@@ -57,13 +57,17 @@ struct tad_search {
               if (target_label.time_stamp_ != state_.current_time_stamp_ || fp_target_time < target_label.arrival_time_) {
                   target_label.arrival_time_ = static_cast<delta_t>(fp_target_time);
                   target_label.time_stamp_ = state_.current_time_stamp_;
+                  target_label.parent_ = l;
+                  target_label.parent_state_ = 0U;
+                  target_label.reached_by_walking_ = true;
                   pq_.push(tad_pq_label{target, static_cast<delta_t>(fp_target_time)});
               }
           }
           
           // --- Phase 2: Scan Routes (Transit Transfers) ---
+          bool const is_initial = (cista::to_idx(l) == cista::to_idx(start_l) && current_time == start_time);
           auto const min_transfer = tt_.locations_.transfer_time_[l].count();
-          auto const transfer_time = adjusted_transfer_time(transfer_time_settings_, min_transfer);
+          auto const transfer_time = is_initial ? 0 : adjusted_transfer_time(transfer_time_settings_, min_transfer);
           auto const board_time = current_time + transfer_time;
           auto const [board_day, board_mam] = split_day_mam(day_idx_t{0}, board_time);
           
@@ -85,6 +89,18 @@ struct tad_search {
                       auto const t = trans.t_idx_;
                       auto const start_day = trans.day_;
                       
+                      // Vehicle Label Dominance: Prune if we already boarded this exact transport at an earlier or equal time
+                      auto& v_label = state_.vehicle_labels_[cista::to_idx(t)];
+                      auto const actual_board_mam = tt_.event_mam(r, t, stop_idx, event_type::kDep);
+                      auto const actual_board_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{actual_board_mam.count()});
+                      
+                      if (v_label.time_stamp_ == state_.current_time_stamp_ && v_label.arrival_time_ <= actual_board_time) {
+                          continue; // Pruned by VLabel
+                      }
+                      
+                      v_label.arrival_time_ = actual_board_time;
+                      v_label.time_stamp_ = state_.current_time_stamp_;
+                      
                       // Scan the rest of the route
                       for (unsigned target_idx = stop_idx + 1; target_idx < stop_seq.size(); ++target_idx) {
                           auto const target_stp = stop(stop_seq[target_idx]);
@@ -98,6 +114,13 @@ struct tad_search {
                           if (target_label.time_stamp_ != state_.current_time_stamp_ || arr_time < target_label.arrival_time_) {
                               target_label.arrival_time_ = arr_time;
                               target_label.time_stamp_ = state_.current_time_stamp_;
+                              target_label.parent_ = l;
+                              // Store transport_idx_t and day_idx_t inside parent_state_
+                              // day is max ~100, easily fits in 8 bits. transport_idx_t in 24 bits.
+                              target_label.parent_state_ = (static_cast<std::uint32_t>(cista::to_idx(start_day)) << 24) | 
+                                                           (static_cast<std::uint32_t>(cista::to_idx(t)) & 0xFFFFFF);
+                              target_label.reached_by_walking_ = false;
+                              
                               pq_.push(tad_pq_label{target_l, arr_time});
                           }
                       }
