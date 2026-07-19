@@ -26,7 +26,7 @@ TEST(routing, tad_forward) {
   // Initialize TAD state and search
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search<direction::kForward> search(tt, state, tts);
+  routing::tad_search search(tt, state, tts);
 
   // Map location "A" ("0000001")
   auto const start_loc_it = tt.locations_.location_id_to_idx_.find({ "0000001", src });
@@ -38,15 +38,17 @@ TEST(routing, tad_forward) {
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 5_hours;
   auto const start_delta = unix_to_delta(base, start_time);
   
-  search.add_start(start_loc, start_delta);
-  search.execute();
+  search.execute(start_loc, start_delta);
 
   // Check arrival at "C" ("0000003")
   auto const dest_loc_it = tt.locations_.location_id_to_idx_.find({ "0000003", src });
   ASSERT_NE(dest_loc_it, tt.locations_.location_id_to_idx_.end());
   auto const dest_loc = dest_loc_it->second;
   
-  auto const arrival = state.node_labels_[to_idx(dest_loc)].arrival_time_;
+  auto const dest_label = state.node_labels_[to_idx(dest_loc)];
+  ASSERT_EQ(dest_label.time_stamp_, state.current_time_stamp_);
+  
+  auto const arrival = dest_label.arrival_time_;
   
   // MVP implementation verified valid path discovery
   EXPECT_EQ(arrival, 10545);
