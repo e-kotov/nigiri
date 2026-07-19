@@ -2,6 +2,7 @@
 #include "nigiri/routing/tad/tad_search.h"
 #include "nigiri/routing/tad/tad_reconstruct.h"
 #include "nigiri/routing/journey.h"
+#include "nigiri/special_stations.h"
 #include "utl/overloaded.h"
 #include "date/date.h"
 
@@ -53,45 +54,74 @@ routing_result tad_route(
         {"tad_scanned_stop_events", stats.scanned_stop_events_},
         {"tad_relaxed_walking_edges", stats.relaxed_walking_edges_},
         {"tad_pruned_scans", stats.pruned_scans_},
-        {"tad_queue_updates", stats.queue_updates_}
+        {"tad_queue_updates", stats.queue_updates_},
+        {"tad_engine_used", 1ULL}
     };
-
-    delta_t best_arr = kInvalidDelta<direction::kForward>;
-    location_idx_t best_dest = location_idx_t::invalid();
 
     for (auto const& dest_offset : q.destination_) {
         auto const dest_loc = dest_offset.target();
+        if (cista::to_idx(dest_loc) >= t_state.node_labels_.size()) {
+            continue;
+        }
         auto const& dest_label = t_state.node_labels_[cista::to_idx(dest_loc)];
         
-        if (dest_label.time_stamp_ == t_state.current_time_stamp_) {
-            auto arr = dest_label.arrival_time_ + static_cast<delta_t>(dest_offset.duration().count());
-            if (best_arr == kInvalidDelta<direction::kForward> || arr < best_arr) {
-                best_arr = arr;
-                best_dest = dest_loc;
+        if (dest_label.time_stamp_ == t_state.current_time_stamp_ && 
+            dest_label.arrival_time_ != kInvalidDelta<direction::kForward>) {
+            
+            routing::journey j;
+            auto curr = dest_loc;
+            while (true) {
+                auto const& label = t_state.node_labels_[cista::to_idx(curr)];
+                if (label.parent_ == curr || label.parent_ == location_idx_t::invalid()) {
+                    break;
+                }
+                curr = label.parent_;
             }
-        }
-    }
-
-    if (best_dest != location_idx_t::invalid()) {
-        routing::journey j;
-        
-        auto curr = best_dest;
-        while (true) {
-            auto const& label = t_state.node_labels_[cista::to_idx(curr)];
-            if (label.parent_ == curr || label.parent_ == location_idx_t::invalid()) {
-                break;
+            auto best_start = curr;
+            
+            routing::tad_reconstruct_journey(tt, q.transfer_time_settings_, t_state, best_start, dest_loc, base, j);
+            
+            offset start_match = offset{location_idx_t::invalid(), duration_t{0}, 0};
+            bool has_start_match = false;
+            for (auto const& start_offset : q.start_) {
+                if (start_offset.target() == best_start) {
+                    start_match = start_offset;
+                    has_start_match = true;
+                    break;
+                }
             }
-            curr = label.parent_;
+            
+            if (has_start_match && q.start_match_mode_ == location_match_mode::kIntermodal) {
+                j.legs_.insert(j.legs_.begin(), journey::leg{
+                    direction::kForward,
+                    get_special_station(special_station::kStart),
+                    best_start,
+                    start_time,
+                    start_time + std::chrono::minutes{start_match.duration().count()},
+                    start_match
+                });
+            }
+            
+            auto const core_arrival = start_time + std::chrono::minutes{dest_label.arrival_time_ - start_delta};
+            auto const final_arrival = core_arrival + std::chrono::minutes{dest_offset.duration().count()};
+            
+            if (q.dest_match_mode_ == location_match_mode::kIntermodal) {
+                j.legs_.push_back(journey::leg{
+                    direction::kForward,
+                    dest_loc,
+                    get_special_station(special_station::kEnd),
+                    core_arrival,
+                    final_arrival,
+                    dest_offset
+                });
+            }
+            
+            j.start_time_ = start_time;
+            j.dest_time_ = final_arrival;
+            j.transfers_ = j.legs_.empty() ? 0 : static_cast<std::uint8_t>(j.legs_.size() - 1);
+            
+            s_state.results_.add(std::move(j));
         }
-        auto best_start = curr;
-        
-        routing::tad_reconstruct_journey(tt, q.transfer_time_settings_, t_state, best_start, best_dest, base, j);
-        
-        j.start_time_ = start_time;
-        j.dest_time_ = start_time + std::chrono::minutes(best_arr - start_delta);
-        j.transfers_ = j.legs_.empty() ? 0 : static_cast<std::uint8_t>(j.legs_.size() - 1);
-        
-        s_state.results_.add(std::move(j));
     }
 
     interval<unixtime_t> out_interval{start_time, start_time};
