@@ -333,3 +333,196 @@ TEST(routing, tad_deterministic_equal_time) {
   // Because A->C arrives at 2:00, and A->B->C arrives at 2:00. A->C is discovered first in the route scan.
   EXPECT_EQ(parent_loc, a_loc) << "Parent reconstruction broke determinism on equal arrival times";
 }
+
+// Phase 1: Same-station queries
+TEST(routing, tad_same_station) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000002 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00110                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  routing::transfer_time_settings tts;
+  routing::tad_state state;
+  routing::tad_search search(tt, state, tts);
+  
+  auto const start_loc_it = tt.locations_.location_id_to_idx_.find({"0000001", src});
+  ASSERT_NE(start_loc_it, tt.locations_.location_id_to_idx_.end());
+  auto const start_loc = start_loc_it->second;
+
+  auto const base = tt.internal_interval_days().from_;
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
+  auto const start_delta = unix_to_delta(base, start_time);
+  
+  search.execute({{start_loc, start_delta}});
+  
+  auto const dest_label = state.node_labels_[to_idx(start_loc)];
+  EXPECT_EQ(dest_label.time_stamp_, state.current_time_stamp_) << "TAD did not reach the start station itself";
+  EXPECT_EQ(dest_label.arrival_time_, start_delta) << "TAD arrival time at start station should be the start time";
+}
+
+// Phase 1: Zero-duration transfer
+TEST(routing, tad_zero_duration_transfer) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000002 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00130                       %
+*Z 00002 80____       048 030                             %
+*A VE 0000002 0000003 000005                              %
+*G RE  0000002 0000003                                    %
+0000002 B                            00130                %
+0000003 C                     00200                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  // Set transfer time for B to 0 to test zero-duration transfers
+  auto const b_it = tt.locations_.location_id_to_idx_.find({"0000002", src});
+  ASSERT_NE(b_it, tt.locations_.location_id_to_idx_.end());
+  tt.locations_.transfer_time_[b_it->second] = 0_minutes;
+
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
+  auto const base = tt.internal_interval_days().from_;
+  auto const start_delta = unix_to_delta(base, start_time);
+  
+  auto const start_loc_it = tt.locations_.location_id_to_idx_.find({"0000001", src});
+  auto const start_loc = start_loc_it->second;
+  auto const dest_loc_it = tt.locations_.location_id_to_idx_.find({"0000003", src});
+  auto const dest_loc = dest_loc_it->second;
+
+  routing::transfer_time_settings tts;
+  routing::tad_state state;
+  routing::tad_search search(tt, state, tts);
+  search.execute({{start_loc, start_delta}});
+  
+  auto const dest_label = state.node_labels_[to_idx(dest_loc)];
+  EXPECT_EQ(dest_label.time_stamp_, state.current_time_stamp_) << "TAD failed to find zero-duration transfer route";
+  
+  // Verify with RAPTOR dynamically to avoid strict leg count which differs on footpaths
+  auto const raptor_results = nigiri::test::raptor_search(
+      tt, nullptr, "0000001", "0000003",
+      interval{start_time, start_time + 1_hours});
+  
+  ASSERT_FALSE(raptor_results.empty()) << "RAPTOR failed to find zero-duration transfer route";
+  
+  delta_t raptor_arrival = kInvalidDelta<direction::kForward>;
+  for (auto const& j : raptor_results) {
+      auto arr = unix_to_delta(base, j.legs_.back().arr_time_);
+      if (raptor_arrival == kInvalidDelta<direction::kForward> || arr < raptor_arrival) {
+          raptor_arrival = arr;
+      }
+  }
+  EXPECT_EQ(dest_label.arrival_time_, raptor_arrival) << "TAD Earliest Arrival Time mismatch with RAPTOR";
+}
+
+// Phase 1: Overnight/multi-day query
+TEST(routing, tad_multi_day) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000002 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            2350                %
+0000002 B                     0020                       %
+*Z 00002 80____       048 030                             %
+*A VE 0000002 0000003 000005                              %
+*G RE  0000002 0000003                                    %
+0000002 B                            0025                %
+0000003 C                     0130                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  verify_tad_raptor_equivalence(tt, "0000001", "0000003", unixtime_t{sys_days{2020_y / March / 30}} + 23_hours + 40_minutes);
+}
+
+// Phase 1: Multiple start-offset cases and Multiple destinations
+TEST(routing, tad_multiple_starts_and_destinations) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000002 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00130                       %
+*Z 00002 80____       048 030                             %
+*A VE 0000002 0000003 000005                              %
+*G RE  0000002 0000003                                    %
+0000002 B                            00140                %
+0000003 C                     00200                       %
+*Z 00003 80____       048 030                             %
+*A VE 0000001 0000004 000005                              %
+*G RE  0000001 0000004                                    %
+0000001 A                            00200                %
+0000004 D                     00230                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  auto const start_it = tt.locations_.location_id_to_idx_.find({"0000001", src});
+  ASSERT_NE(start_it, tt.locations_.location_id_to_idx_.end());
+  auto const start_loc = start_it->second;
+
+  auto const dest1_it = tt.locations_.location_id_to_idx_.find({"0000003", src});
+  ASSERT_NE(dest1_it, tt.locations_.location_id_to_idx_.end());
+  auto const dest1_loc = dest1_it->second;
+
+  auto const dest2_it = tt.locations_.location_id_to_idx_.find({"0000004", src});
+  ASSERT_NE(dest2_it, tt.locations_.location_id_to_idx_.end());
+  auto const dest2_loc = dest2_it->second;
+
+  routing::transfer_time_settings tts;
+  routing::tad_state state;
+  routing::tad_search search(tt, state, tts);
+  
+  auto const base = tt.internal_interval_days().from_;
+  auto const base_time = unixtime_t{sys_days{2020_y / March / 30}};
+  
+  std::vector<std::pair<location_idx_t, delta_t>> starts = {
+      {start_loc, unix_to_delta(base, base_time)},
+      {start_loc, unix_to_delta(base, base_time + 90_minutes)} // Second offset at 01:30
+  };
+  
+  search.execute(starts);
+  
+  auto const dest1_label = state.node_labels_[to_idx(dest1_loc)];
+  EXPECT_EQ(dest1_label.time_stamp_, state.current_time_stamp_);
+  
+  auto const dest2_label = state.node_labels_[to_idx(dest2_loc)];
+  EXPECT_EQ(dest2_label.time_stamp_, state.current_time_stamp_);
+  
+  // Use RAPTOR to fetch the exact expected arrivals for robust verification against timezones
+  auto raptor_c = nigiri::test::raptor_search(tt, nullptr, "0000001", "0000003", interval{base_time, base_time + 2_hours});
+  ASSERT_FALSE(raptor_c.empty());
+  delta_t expected_c_arrival = kInvalidDelta<direction::kForward>;
+  for (auto const& j : raptor_c) {
+      auto const arr = unix_to_delta(base, j.legs_.back().arr_time_);
+      if (expected_c_arrival == kInvalidDelta<direction::kForward> || arr < expected_c_arrival) { expected_c_arrival = arr; }
+  }
+  EXPECT_EQ(dest1_label.arrival_time_, expected_c_arrival);
+  
+  auto raptor_d = nigiri::test::raptor_search(tt, nullptr, "0000001", "0000004", interval{base_time, base_time + 3_hours});
+  ASSERT_FALSE(raptor_d.empty());
+  delta_t expected_d_arrival = kInvalidDelta<direction::kForward>;
+  for (auto const& j : raptor_d) {
+      auto const arr = unix_to_delta(base, j.legs_.back().arr_time_);
+      if (expected_d_arrival == kInvalidDelta<direction::kForward> || arr < expected_d_arrival) { expected_d_arrival = arr; }
+  }
+  EXPECT_EQ(dest2_label.arrival_time_, expected_d_arrival);
+}
