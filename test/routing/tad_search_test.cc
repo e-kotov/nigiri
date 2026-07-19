@@ -209,10 +209,43 @@ TEST(routing, tad_walking_transfer_improvement) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  
+  constexpr auto const footpaths = R"(
+0000010 0000006  02
+0000006 0000010  02
+)";
+  
+  auto dir = test_data::hrd_timetable::base();
+  dir.add({loader::hrd::hrd_5_20_26.fplan_ / "services.101", services});
+  dir.dir_[loader::hrd::hrd_5_20_26.core_data_ / loader::hrd::hrd_5_20_26.required_files_[loader::hrd::FOOTPATHS][0]] = footpaths;
+
+  load_timetable(src, loader::hrd::hrd_5_20_26, dir, tt);
   finalize(tt);
   
   verify_tad_raptor_equivalence(tt, "0000001", "0000006", unixtime_t{sys_days{2020_y / March / 30}});
+  
+  // Explicitly verify walking improvement chain
+  auto const start_loc = tt.locations_.location_id_to_idx_.find({"0000001", src})->second;
+  auto const dest_loc = tt.locations_.location_id_to_idx_.find({"0000006", src})->second;
+  
+  routing::transfer_time_settings tts;
+  routing::tad_state state;
+  routing::tad_search search(tt, state, tts);
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
+  auto const base = tt.internal_interval_days().from_;
+  
+  auto const f_meta_loc = tt.locations_.location_id_to_idx_.find({"0000010", src})->second;
+  
+  search.execute(start_loc, unix_to_delta(base, start_time));
+  
+  auto const dest_label = state.node_labels_[to_idx(dest_loc)];
+  
+  ASSERT_EQ(dest_label.time_stamp_, state.current_time_stamp_);
+  
+  // F (0000006) should be reached via a walking transfer from F_META (0000010)
+  EXPECT_TRUE(dest_label.reached_by_walking_) << "Walking transfer was not chosen over direct transit";
+  auto const parent_loc = dest_label.parent_;
+  EXPECT_EQ(parent_loc, f_meta_loc);
 }
 
 // 10. Deterministic Equal-Time Reconstruction
@@ -241,4 +274,26 @@ TEST(routing, tad_deterministic_equal_time) {
   finalize(tt);
   
   verify_tad_raptor_equivalence(tt, "0000001", "0000003", unixtime_t{sys_days{2020_y / March / 30}});
+  
+  // Explicitly verify deterministic equal-time reconstruction chain
+  auto const start_loc = tt.locations_.location_id_to_idx_.find({"0000001", src})->second;
+  auto const dest_loc = tt.locations_.location_id_to_idx_.find({"0000003", src})->second;
+  
+  routing::transfer_time_settings tts;
+  routing::tad_state state;
+  routing::tad_search search(tt, state, tts);
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
+  auto const base = tt.internal_interval_days().from_;
+  search.execute(start_loc, unix_to_delta(base, start_time));
+  
+  auto const dest_label = state.node_labels_[to_idx(dest_loc)];
+  ASSERT_EQ(dest_label.time_stamp_, state.current_time_stamp_);
+  
+  // Since A->C direct and A->B->C have identical arrivals (00200) and we process in deterministic order, 
+  // we check that the chosen parent is deterministic (e.g., direct route via A->C should be preferred or predictable)
+  auto const parent_loc = dest_label.parent_;
+  auto const a_loc = start_loc;
+  // A direct trip A->C will have A as parent. A transfer A->B->C will have B as parent.
+  // Because A->C arrives at 2:00, and A->B->C arrives at 2:00. A->C is discovered first in the route scan.
+  EXPECT_EQ(parent_loc, a_loc) << "Parent reconstruction broke determinism on equal arrival times";
 }

@@ -93,6 +93,9 @@ struct tad_search {
                       
                       // Vehicle Label Dominance: Prune if we already boarded this exact transport on this day at an earlier or equal time
                       auto const v_label_idx = cista::to_idx(t) * state_.n_days_ + cista::to_idx(start_day);
+                      if (v_label_idx >= state_.vehicle_labels_.size()) {
+                          throw std::runtime_error("TAD Search: v_label_idx out of bounds");
+                      }
                       auto& v_label = state_.vehicle_labels_[v_label_idx];
                       auto const actual_board_mam = tt_.event_mam(r, t, stop_idx, event_type::kDep);
                       auto const actual_board_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{actual_board_mam.count()});
