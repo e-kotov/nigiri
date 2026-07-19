@@ -37,7 +37,7 @@ void verify_tad_raptor_equivalence(timetable const& tt, std::string const& start
   auto const base = tt.internal_interval_days().from_;
   auto const start_delta = unix_to_delta(base, start_time);
   
-  search.execute(start_loc, start_delta);
+  search.execute({{start_loc, start_delta}});
   
   auto const dest_label = state.node_labels_[to_idx(dest_loc)];
   bool tad_found = dest_label.time_stamp_ == state.current_time_stamp_;
@@ -77,6 +77,7 @@ void verify_tad_raptor_equivalence(timetable const& tt, std::string const& start
               best_raptor = &j;
               break;
           }
+      }
       ASSERT_NE(best_raptor, nullptr);
       
       EXPECT_EQ(tad_journey.legs_.size(), best_raptor->legs_.size()) << "Leg count mismatch";
@@ -267,7 +268,7 @@ TEST(routing, tad_walking_transfer_improvement) {
   ASSERT_NE(f_meta_it, tt.locations_.location_id_to_idx_.end());
   auto const f_meta_loc = f_meta_it->second;
   
-  search.execute(start_loc, unix_to_delta(base, start_time));
+  search.execute({{start_loc, unix_to_delta(base, start_time)}});
   
   auto const dest_label = state.node_labels_[to_idx(dest_loc)];
   
@@ -319,7 +320,7 @@ TEST(routing, tad_deterministic_equal_time) {
   routing::tad_search search(tt, state, tts);
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
   auto const base = tt.internal_interval_days().from_;
-  search.execute(start_loc, unix_to_delta(base, start_time));
+  search.execute({{start_loc, unix_to_delta(base, start_time)}});
   
   auto const dest_label = state.node_labels_[to_idx(dest_loc)];
   ASSERT_EQ(dest_label.time_stamp_, state.current_time_stamp_);

@@ -33,15 +33,18 @@ struct tad_search {
       state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size(), n_days);
   }
 
-  tad_stats execute(location_idx_t const start_l, delta_t const start_time) {
+  tad_stats execute(std::vector<std::pair<location_idx_t, delta_t>> const& starts) {
       stats_ = tad_stats{};
       state_.next_start_time();
       
-      pq_.push(tad_pq_label{start_l, start_time});
-      
-      auto& start_label = state_.node_labels_[cista::to_idx(start_l)];
-      start_label.arrival_time_ = start_time;
-      start_label.time_stamp_ = state_.current_time_stamp_;
+      for (auto const& [start_l, start_time] : starts) {
+          pq_.push(tad_pq_label{start_l, start_time});
+          auto& start_label = state_.node_labels_[cista::to_idx(start_l)];
+          if (start_label.time_stamp_ != state_.current_time_stamp_ || start_time < start_label.arrival_time_) {
+              start_label.arrival_time_ = start_time;
+              start_label.time_stamp_ = state_.current_time_stamp_;
+          }
+      }
 
       while (!pq_.empty()) {
           auto const current = pq_.top();
@@ -81,7 +84,13 @@ struct tad_search {
           }
           
           // --- Phase 2: Scan Routes (Transit Transfers) ---
-          bool const is_initial = (cista::to_idx(l) == cista::to_idx(start_l) && current_time == start_time);
+          bool is_initial = false;
+          for (auto const& [s_l, s_time] : starts) {
+              if (cista::to_idx(l) == cista::to_idx(s_l) && current_time == s_time) {
+                  is_initial = true;
+                  break;
+              }
+          }
           auto const min_transfer = tt_.locations_.transfer_time_[l].count();
           auto const transfer_time = is_initial ? 0 : adjusted_transfer_time(transfer_time_settings_, min_transfer);
           auto const board_time = current_time + transfer_time;
