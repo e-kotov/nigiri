@@ -82,6 +82,7 @@ struct benchmark_result {
   }
   std::uint64_t q_idx_;
   std::chrono::milliseconds total_time_;
+  routing::tad_stats stats_;
 };
 
 void generate_queries(
@@ -133,13 +134,14 @@ void process_queries(
             auto const start_time = std::holds_alternative<unixtime_t>(q.start_time_) 
               ? std::get<unixtime_t>(q.start_time_) 
               : std::get<interval<unixtime_t>>(q.start_time_).from_;
-            search.execute(start_l, unix_to_delta(tt.internal_interval_days().from_, start_time));
+            auto const stats = search.execute(start_l, unix_to_delta(tt.internal_interval_days().from_, start_time));
             
             auto const total_time_stop = std::chrono::steady_clock::now();
             auto const guard = std::lock_guard{mutex};
             results.emplace_back(benchmark_result{
                 q_idx,
-                std::chrono::duration_cast<std::chrono::milliseconds>(total_time_stop - total_time_start)});
+                std::chrono::duration_cast<std::chrono::milliseconds>(total_time_stop - total_time_start),
+                stats});
             progress_tracker->increment();
           } catch (std::exception const& e) {
             std::cout << e.what() << "\n";
@@ -411,12 +413,23 @@ int main(int argc, char* argv[]) {
   print_memory_usage();
 
   auto total = std::chrono::milliseconds{0U};
+  routing::tad_stats total_stats;
   for (auto const& res : results) {
     total += res.total_time_;
+    total_stats.settled_stop_labels_ += res.stats_.settled_stop_labels_;
+    total_stats.scanned_routes_ += res.stats_.scanned_routes_;
+    total_stats.scanned_stop_events_ += res.stats_.scanned_stop_events_;
+    total_stats.relaxed_walking_edges_ += res.stats_.relaxed_walking_edges_;
+    total_stats.pruned_scans_ += res.stats_.pruned_scans_;
+    total_stats.queue_updates_ += res.stats_.queue_updates_;
   }
-  std::cout << "AVG: " << (static_cast<double>(total.count()) / results.size())
-            << "ms\n";
-
+  std::cout << "AVG: " << (static_cast<double>(total.count()) / results.size()) << "ms\n";
+  std::cout << "AVG Settled Stop Labels: " << (static_cast<double>(total_stats.settled_stop_labels_) / results.size()) << "\n";
+  std::cout << "AVG Scanned Routes: " << (static_cast<double>(total_stats.scanned_routes_) / results.size()) << "\n";
+  std::cout << "AVG Scanned Stop Events: " << (static_cast<double>(total_stats.scanned_stop_events_) / results.size()) << "\n";
+  std::cout << "AVG Relaxed Walking Edges: " << (static_cast<double>(total_stats.relaxed_walking_edges_) / results.size()) << "\n";
+  std::cout << "AVG Pruned Scans: " << (static_cast<double>(total_stats.pruned_scans_) / results.size()) << "\n";
+  std::cout << "AVG Queue Updates: " << (static_cast<double>(total_stats.queue_updates_) / results.size()) << "\n";
 
 
   return 0;

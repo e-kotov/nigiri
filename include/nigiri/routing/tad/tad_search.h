@@ -17,6 +17,15 @@ struct tad_pq_label {
   }
 };
 
+struct tad_stats {
+  std::uint64_t settled_stop_labels_{0};
+  std::uint64_t scanned_routes_{0};
+  std::uint64_t scanned_stop_events_{0};
+  std::uint64_t relaxed_walking_edges_{0};
+  std::uint64_t pruned_scans_{0};
+  std::uint64_t queue_updates_{0};
+};
+
 struct tad_search {
   tad_search(timetable const& tt, tad_state& state, transfer_time_settings const& tts)
       : tt_{tt}, state_{state}, transfer_time_settings_{tts} {
@@ -24,7 +33,8 @@ struct tad_search {
       state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size(), n_days);
   }
 
-  void execute(location_idx_t const start_l, delta_t const start_time) {
+  tad_stats execute(location_idx_t const start_l, delta_t const start_time) {
+      stats_ = tad_stats{};
       state_.next_start_time();
       
       pq_.push(tad_pq_label{start_l, start_time});
@@ -36,6 +46,7 @@ struct tad_search {
       while (!pq_.empty()) {
           auto const current = pq_.top();
           pq_.pop();
+          ++stats_.settled_stop_labels_;
 
           auto const l = current.l_;
           auto const current_time = current.arr_;
@@ -49,6 +60,7 @@ struct tad_search {
           // --- Phase 1: Relax Footpaths (Walking Transfers) ---
           auto const& fps = tt_.locations_.footpaths_out_[profile_idx_t{0}][l];
           for (auto const& fp : fps) {
+              ++stats_.relaxed_walking_edges_;
               auto const target = fp.target();
               auto const duration = fp.duration().count();
               auto const transfer_time = adjusted_transfer_time(transfer_time_settings_, duration); 
@@ -64,6 +76,7 @@ struct tad_search {
                   target_label.parent_day_ = day_idx_t::invalid();
                   target_label.reached_by_walking_ = true;
                   pq_.push(tad_pq_label{target, static_cast<delta_t>(fp_target_time)});
+                  ++stats_.queue_updates_;
               }
           }
           
@@ -75,6 +88,7 @@ struct tad_search {
           auto const [board_day, board_mam] = split_day_mam(day_idx_t{0}, board_time);
           
           for (auto const& r : tt_.location_routes_[l]) {
+              ++stats_.scanned_routes_;
               auto const stop_seq = tt_.route_location_seq_[r];
               
               for (unsigned stop_idx = 0; stop_idx < stop_seq.size(); ++stop_idx) {
@@ -102,6 +116,7 @@ struct tad_search {
                       auto const actual_board_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{actual_board_mam.count()});
                       
                       if (v_label.time_stamp_ == state_.current_time_stamp_ && v_label.arrival_time_ <= actual_board_time) {
+                          ++stats_.pruned_scans_;
                           continue; // Pruned by VLabel
                       }
                       
@@ -110,6 +125,7 @@ struct tad_search {
                       
                       // Scan the rest of the route
                       for (unsigned target_idx = stop_idx + 1; target_idx < stop_seq.size(); ++target_idx) {
+                          ++stats_.scanned_stop_events_;
                           auto const target_stp = stop(stop_seq[target_idx]);
                           if (!target_stp.can_finish<direction::kForward>(false)) continue;
                           
@@ -127,12 +143,14 @@ struct tad_search {
                               target_label.reached_by_walking_ = false;
                               
                               pq_.push(tad_pq_label{target_l, arr_time});
+                              ++stats_.queue_updates_;
                           }
                       }
                   }
               }
           }
       }
+      return stats_;
   }
 
 private:
@@ -140,6 +158,7 @@ private:
   tad_state& state_;
   transfer_time_settings transfer_time_settings_;
   std::priority_queue<tad_pq_label> pq_;
+  tad_stats stats_;
 };
 
 } // namespace nigiri::routing
