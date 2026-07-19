@@ -20,8 +20,13 @@ using namespace nigiri::test_data::hrd_timetable;
 // Helper to run both TAD and RAPTOR and assert they yield the same Earliest Arrival Time
 void verify_tad_raptor_equivalence(timetable const& tt, std::string const& start_id, std::string const& dest_id, unixtime_t start_time) {
   constexpr auto const src = source_idx_t{0U};
-  auto const start_loc = tt.locations_.location_id_to_idx_.find({start_id, src})->second;
-  auto const dest_loc = tt.locations_.location_id_to_idx_.find({dest_id, src})->second;
+  auto const start_loc_it = tt.locations_.location_id_to_idx_.find({start_id, src});
+  ASSERT_NE(start_loc_it, tt.locations_.location_id_to_idx_.end()) << "Start location " << start_id << " not found!";
+  auto const start_loc = start_loc_it->second;
+
+  auto const dest_loc_it = tt.locations_.location_id_to_idx_.find({dest_id, src});
+  ASSERT_NE(dest_loc_it, tt.locations_.location_id_to_idx_.end()) << "Destination location " << dest_id << " not found!";
+  auto const dest_loc = dest_loc_it->second;
 
   // 1. Run TAD
   routing::transfer_time_settings tts;
@@ -185,4 +190,55 @@ TEST(routing, tad_no_route) {
   finalize(tt);
   
   verify_tad_raptor_equivalence(tt, "0000001", "0000004", unixtime_t{sys_days{2020_y / March / 30}});
+}
+
+// 9. Walking Transfer Improvement
+TEST(routing, tad_walking_transfer_improvement) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000006 000005                              %
+*G RE  0000001 0000006                                    %
+0000001 A                            00100                %
+0000006 F                     00200                       %
+*Z 00002 80____       048 030                             %
+*A VE 0000001 0000010 000005                              %
+*G RE  0000001 0000010                                    %
+0000001 A                            00110                %
+0000010 F_META                00150                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  verify_tad_raptor_equivalence(tt, "0000001", "0000006", unixtime_t{sys_days{2020_y / March / 30}});
+}
+
+// 10. Deterministic Equal-Time Reconstruction
+TEST(routing, tad_deterministic_equal_time) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000003 000005                              %
+*G RE  0000001 0000003                                    %
+0000001 A                            00100                %
+0000003 C                     00200                       %
+*Z 00002 80____       048 030                             %
+*A VE 0000001 0000002 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00130                       %
+*Z 00003 80____       048 030                             %
+*A VE 0000002 0000003 000005                              %
+*G RE  0000002 0000003                                    %
+0000002 B                            00140                %
+0000003 C                     00200                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  verify_tad_raptor_equivalence(tt, "0000001", "0000003", unixtime_t{sys_days{2020_y / March / 30}});
 }

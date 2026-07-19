@@ -19,7 +19,8 @@ struct tad_pq_label {
 struct tad_search {
   tad_search(timetable const& tt, tad_state& state, transfer_time_settings const& tts)
       : tt_{tt}, state_{state}, transfer_time_settings_{tts} {
-      state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size());
+      auto const n_days = static_cast<unsigned>(tt_.internal_interval_days().size().count());
+      state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size(), n_days);
   }
 
   void execute(location_idx_t const start_l, delta_t const start_time) {
@@ -58,7 +59,8 @@ struct tad_search {
                   target_label.arrival_time_ = static_cast<delta_t>(fp_target_time);
                   target_label.time_stamp_ = state_.current_time_stamp_;
                   target_label.parent_ = l;
-                  target_label.parent_state_ = 0U;
+                  target_label.parent_transport_ = transport_idx_t::invalid();
+                  target_label.parent_day_ = day_idx_t::invalid();
                   target_label.reached_by_walking_ = true;
                   pq_.push(tad_pq_label{target, static_cast<delta_t>(fp_target_time)});
               }
@@ -89,8 +91,9 @@ struct tad_search {
                       auto const t = trans.t_idx_;
                       auto const start_day = trans.day_;
                       
-                      // Vehicle Label Dominance: Prune if we already boarded this exact transport at an earlier or equal time
-                      auto& v_label = state_.vehicle_labels_[cista::to_idx(t)];
+                      // Vehicle Label Dominance: Prune if we already boarded this exact transport on this day at an earlier or equal time
+                      auto const v_label_idx = cista::to_idx(t) * state_.n_days_ + cista::to_idx(start_day);
+                      auto& v_label = state_.vehicle_labels_[v_label_idx];
                       auto const actual_board_mam = tt_.event_mam(r, t, stop_idx, event_type::kDep);
                       auto const actual_board_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{actual_board_mam.count()});
                       
@@ -115,10 +118,8 @@ struct tad_search {
                               target_label.arrival_time_ = arr_time;
                               target_label.time_stamp_ = state_.current_time_stamp_;
                               target_label.parent_ = l;
-                              // Store transport_idx_t and day_idx_t inside parent_state_
-                              // day is max ~100, easily fits in 8 bits. transport_idx_t in 24 bits.
-                              target_label.parent_state_ = (static_cast<std::uint32_t>(cista::to_idx(start_day)) << 24) | 
-                                                           (static_cast<std::uint32_t>(cista::to_idx(t)) & 0xFFFFFF);
+                              target_label.parent_transport_ = t;
+                              target_label.parent_day_ = start_day;
                               target_label.reached_by_walking_ = false;
                               
                               pq_.push(tad_pq_label{target_l, arr_time});

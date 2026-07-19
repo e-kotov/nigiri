@@ -13,9 +13,10 @@ struct tad_node_label {
   delta_t arrival_time_{kInvalidDelta<direction::kForward>}; // 2 bytes
   std::uint16_t time_stamp_{0U};                               // 2 bytes
   location_idx_t parent_{location_idx_t::invalid()};           // 4 bytes
-  std::uint32_t parent_state_{0U};                             // 4 bytes
+  transport_idx_t parent_transport_{transport_idx_t::invalid()}; // 4 bytes
+  day_idx_t parent_day_{day_idx_t::invalid()};                 // 2 bytes
   bool reached_by_walking_{false};                             // 1 byte
-  // 3 bytes padding -> 16 bytes total
+  // 1 byte padding -> 16 bytes total
 };
 static_assert(sizeof(tad_node_label) <= 16, "NodeLabel should be tightly packed to 16 bytes");
 
@@ -34,10 +35,11 @@ struct tad_state {
   tad_state& operator=(tad_state&&) = default;
   ~tad_state() = default;
 
-  tad_state& resize(unsigned n_locations, unsigned n_route_transports) {
+  tad_state& resize(unsigned n_locations, unsigned n_route_transports, unsigned n_days) {
     n_locations_ = n_locations;
+    n_days_ = n_days;
     node_labels_.resize(n_locations);
-    vehicle_labels_.resize(n_route_transports);
+    vehicle_labels_.resize(n_route_transports * n_days);
     return *this;
   }
 
@@ -53,6 +55,7 @@ struct tad_state {
   }
 
   unsigned n_locations_{0U};
+  unsigned n_days_{0U};
   std::uint16_t current_time_stamp_{0U};
 
   std::vector<tad_node_label> node_labels_;
