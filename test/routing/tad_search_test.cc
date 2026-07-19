@@ -225,8 +225,12 @@ TEST(routing, tad_walking_transfer_improvement) {
   verify_tad_raptor_equivalence(tt, "0000001", "0000006", unixtime_t{sys_days{2020_y / March / 30}});
   
   // Explicitly verify walking improvement chain
-  auto const start_loc = tt.locations_.location_id_to_idx_.find({"0000001", src})->second;
-  auto const dest_loc = tt.locations_.location_id_to_idx_.find({"0000006", src})->second;
+  auto const start_it = tt.locations_.location_id_to_idx_.find({"0000001", src});
+  ASSERT_NE(start_it, tt.locations_.location_id_to_idx_.end());
+  auto const start_loc = start_it->second;
+  auto const dest_it = tt.locations_.location_id_to_idx_.find({"0000006", src});
+  ASSERT_NE(dest_it, tt.locations_.location_id_to_idx_.end());
+  auto const dest_loc = dest_it->second;
   
   routing::transfer_time_settings tts;
   routing::tad_state state;
@@ -234,7 +238,9 @@ TEST(routing, tad_walking_transfer_improvement) {
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
   auto const base = tt.internal_interval_days().from_;
   
-  auto const f_meta_loc = tt.locations_.location_id_to_idx_.find({"0000010", src})->second;
+  auto const f_meta_it = tt.locations_.location_id_to_idx_.find({"0000010", src});
+  ASSERT_NE(f_meta_it, tt.locations_.location_id_to_idx_.end());
+  auto const f_meta_loc = f_meta_it->second;
   
   search.execute(start_loc, unix_to_delta(base, start_time));
   
@@ -276,8 +282,12 @@ TEST(routing, tad_deterministic_equal_time) {
   verify_tad_raptor_equivalence(tt, "0000001", "0000003", unixtime_t{sys_days{2020_y / March / 30}});
   
   // Explicitly verify deterministic equal-time reconstruction chain
-  auto const start_loc = tt.locations_.location_id_to_idx_.find({"0000001", src})->second;
-  auto const dest_loc = tt.locations_.location_id_to_idx_.find({"0000003", src})->second;
+  auto const start_it = tt.locations_.location_id_to_idx_.find({"0000001", src});
+  ASSERT_NE(start_it, tt.locations_.location_id_to_idx_.end());
+  auto const start_loc = start_it->second;
+  auto const dest_it = tt.locations_.location_id_to_idx_.find({"0000003", src});
+  ASSERT_NE(dest_it, tt.locations_.location_id_to_idx_.end());
+  auto const dest_loc = dest_it->second;
   
   routing::transfer_time_settings tts;
   routing::tad_state state;

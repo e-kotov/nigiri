@@ -1,6 +1,7 @@
 #pragma once
 
 #include <queue>
+#include <stdexcept>
 #include "nigiri/routing/tad/tad_state.h"
 #include "nigiri/routing/transfer_time_settings.h"
 #include "nigiri/routing/get_earliest_transport.h"
