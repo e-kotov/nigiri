@@ -7,6 +7,7 @@
 
 #include "nigiri/routing/tad/tad_search.h"
 #include "nigiri/routing/tad/tad_state.h"
+#include "nigiri/routing/tad/tad_reconstruct.h"
 #include "nigiri/routing/transfer_time_settings.h"
 #include "../raptor_search.h"
 #include "nigiri/timetable.h"
@@ -65,6 +66,30 @@ void verify_tad_raptor_equivalence(timetable const& tt, std::string const& start
           << "TAD and RAPTOR disagree on Earliest Arrival Time.\n"
           << "RAPTOR output:\n" << to_string(tt, raptor_results)
           << "TAD arrival: " << tad_arrival << ", RAPTOR arrival: " << raptor_arrival;
+          
+      routing::journey tad_journey;
+      routing::tad_reconstruct_journey(tt, tts, state, start_loc, dest_loc, base, tad_journey);
+      
+      routing::journey const* best_raptor = nullptr;
+      for (auto const& j : raptor_results) {
+          auto arr = unix_to_delta(base, j.legs_.back().arr_time_);
+          if (arr == raptor_arrival) {
+              best_raptor = &j;
+              break;
+          }
+      ASSERT_NE(best_raptor, nullptr);
+      
+      EXPECT_EQ(tad_journey.legs_.size(), best_raptor->legs_.size()) << "Leg count mismatch";
+      if (tad_journey.legs_.size() == best_raptor->legs_.size()) {
+          for (size_t i = 0; i < tad_journey.legs_.size(); ++i) {
+              auto const& tl = tad_journey.legs_[i];
+              auto const& rl = best_raptor->legs_[i];
+              EXPECT_EQ(tl.from_, rl.from_) << "Leg " << i << " from_ mismatch";
+              EXPECT_EQ(tl.to_, rl.to_) << "Leg " << i << " to_ mismatch";
+              EXPECT_EQ(tl.dep_time_, rl.dep_time_) << "Leg " << i << " dep_time mismatch";
+              EXPECT_EQ(tl.arr_time_, rl.arr_time_) << "Leg " << i << " arr_time mismatch";
+          }
+      }
   }
 }
 
