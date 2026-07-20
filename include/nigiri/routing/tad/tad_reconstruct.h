@@ -14,9 +14,11 @@ inline void tad_reconstruct_journey(timetable const& tt,
                                     tad_state const& state,
                                     location_idx_t const start_l,
                                     location_idx_t const dest_l,
+                                    profile_idx_t const prf_idx,
                                     date::sys_days const base,
                                     journey& j) {
   auto curr_l = dest_l;
+  bool const is_wheelchair = prf_idx == kWheelchairProfile;
   
   while (curr_l != start_l && curr_l != location_idx_t::invalid()) {
     auto const& lbl = state.node_labels_[cista::to_idx(curr_l)];
@@ -53,7 +55,7 @@ inline void tad_reconstruct_journey(timetable const& tt,
       delta_t actual_board_time = kInvalidDelta<direction::kForward>;
       
       for (unsigned i = 0; i < seq.size(); ++i) {
-        if (stop{seq[i]}.location_idx() == parent_l && stop{seq[i]}.can_start<direction::kForward>(false)) {
+        if (stop{seq[i]}.location_idx() == parent_l && stop{seq[i]}.can_start<direction::kForward>(is_wheelchair)) {
           auto const dep_mam = tt.event_mam(r, t, i, event_type::kDep);
           auto const event_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{dep_mam.count()});
           if (event_time >= dep_time) {
@@ -66,7 +68,7 @@ inline void tad_reconstruct_journey(timetable const& tt,
       
       stop_idx_t alight_stop_idx = 0;
       for (unsigned i = board_stop_idx + 1; i < seq.size(); ++i) {
-        if (stop{seq[i]}.location_idx() == curr_l && stop{seq[i]}.can_finish<direction::kForward>(false)) {
+        if (stop{seq[i]}.location_idx() == curr_l && stop{seq[i]}.can_finish<direction::kForward>(is_wheelchair)) {
           auto const arr_mam = tt.event_mam(r, t, i, event_type::kArr);
           auto const event_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{arr_mam.count()});
           if (event_time == arr_time) {

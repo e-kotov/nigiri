@@ -84,7 +84,7 @@ routing_result tad_route(
         }
         auto best_start = curr;
         
-        routing::tad_reconstruct_journey(tt, q.transfer_time_settings_, t_state, best_start, dest_loc, base, j);
+        routing::tad_reconstruct_journey(tt, q.transfer_time_settings_, t_state, best_start, dest_loc, q.prf_idx_, base, j);
         
         offset start_match = offset{location_idx_t::invalid(), duration_t{0}, 0};
         bool has_start_match = false;

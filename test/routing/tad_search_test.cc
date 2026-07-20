@@ -737,3 +737,71 @@ TEST(routing, tad_mixed_static_td_offsets) {
       EXPECT_EQ(raptor_res.journeys_->begin()->dest_time_, tad_res.journeys_->begin()->dest_time_);
   }
 }
+
+TEST(routing, tad_adversarial_class_filter) {
+  // Route 1 (0000001 -> 0000002): ICE (HIGHSPEED_RAIL, clasz 0), dep 01:00, arr 01:20
+  // Route 2 (0000001 -> 0000002): RE (REGIONAL, clasz 3), dep 01:00, arr 01:50
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A ICE00001 0000001 0000002 000001                        %
+*G ICE 0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00120                       %
+
+*Z 00002 80____       048 030                             %
+*A RE000002 0000001 0000002 000001                        %
+*G RE  0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00150                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const base_time = unixtime_t{sys_days{2020_y / March / 30}} + 23_hours + 40_minutes;
+
+  // 1. Without restriction: should select fast ICE route (arr 01:20)
+  {
+    routing::query q;
+    q.start_time_ = interval{base_time, base_time + 2_hours};
+    q.start_ = {{start_loc, 0_minutes, 0U}};
+    q.destination_ = {{dest_loc, 0_minutes, 0U}};
+
+    routing::search_state r_s; routing::raptor_state r_r;
+    using r_algo = routing::raptor<direction::kForward, false, 0, routing::search_mode::kOneToOne>;
+    auto r_res = routing::search<direction::kForward, r_algo>{tt, nullptr, r_s, r_r, q, std::nullopt}.execute();
+
+    routing::search_state t_s; routing::tad_state t_t;
+    auto t_res = routing::tad_route(tt, nullptr, t_s, t_t, q, direction::kForward);
+
+    ASSERT_FALSE(r_res.journeys_->empty());
+    ASSERT_FALSE(t_res.journeys_->empty());
+    EXPECT_EQ(r_res.journeys_->begin()->dest_time_, t_res.journeys_->begin()->dest_time_);
+  }
+
+  // 2. With class restriction excluding ICE (clasz 0), allowing only RE:
+  // Both RAPTOR and TAD MUST switch to the slower RE route (arr 01:50) instead of ICE!
+  {
+    routing::query q;
+    q.start_time_ = interval{base_time, base_time + 2_hours};
+    q.start_ = {{start_loc, 0_minutes, 0U}};
+    q.destination_ = {{dest_loc, 0_minutes, 0U}};
+    q.allowed_claszes_ = clasz_mask_t{1U << static_cast<std::size_t>(clasz::kRegional)};
+
+    routing::search_state r_s; routing::raptor_state r_r;
+    using r_algo = routing::raptor<direction::kForward, false, 0, routing::search_mode::kOneToOne>;
+    auto r_res = routing::search<direction::kForward, r_algo>{tt, nullptr, r_s, r_r, q, std::nullopt}.execute();
+
+    routing::search_state t_s; routing::tad_state t_t;
+    auto t_res = routing::tad_route(tt, nullptr, t_s, t_t, q, direction::kForward);
+
+    ASSERT_FALSE(r_res.journeys_->empty());
+    ASSERT_FALSE(t_res.journeys_->empty());
+    // Both must pick the slower route (arr 01:50)
+    EXPECT_EQ(r_res.journeys_->begin()->dest_time_, t_res.journeys_->begin()->dest_time_);
+  }
+}

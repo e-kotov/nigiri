@@ -108,9 +108,10 @@ struct tad_search {
               ++stats_.scanned_routes_;
               auto const stop_seq = tt_.route_location_seq_[r];
               
+              bool const is_wheelchair = prf_idx_ == kWheelchairProfile;
               for (unsigned stop_idx = 0; stop_idx < stop_seq.size(); ++stop_idx) {
                   auto const stp = stop(stop_seq[stop_idx]);
-                  if (cista::to_idx(stp.location_idx()) != cista::to_idx(l) || !stp.can_start<direction::kForward>(false)) {
+                  if (cista::to_idx(stp.location_idx()) != cista::to_idx(l) || !stp.can_start<direction::kForward>(is_wheelchair)) {
                       continue;
                   }
                   
@@ -143,8 +144,22 @@ struct tad_search {
                       // Scan the rest of the route
                       for (unsigned target_idx = stop_idx + 1; target_idx < stop_seq.size(); ++target_idx) {
                           ++stats_.scanned_stop_events_;
+                          
+                          if (require_bike_ && 
+                              !tt_.route_bikes_allowed_per_section_.empty() && 
+                              !tt_.route_bikes_allowed_per_section_[r].empty() &&
+                              !tt_.route_bikes_allowed_per_section_[r][target_idx - 1]) {
+                              break; // Bike not allowed on this section
+                          }
+                          if (require_car_ && 
+                              !tt_.route_cars_allowed_per_section_.empty() && 
+                              !tt_.route_cars_allowed_per_section_[r].empty() &&
+                              !tt_.route_cars_allowed_per_section_[r][target_idx - 1]) {
+                              break; // Car not allowed on this section
+                          }
+
                           auto const target_stp = stop(stop_seq[target_idx]);
-                          if (!target_stp.can_finish<direction::kForward>(false)) continue;
+                          if (!target_stp.can_finish<direction::kForward>(is_wheelchair)) continue;
                           
                           auto const target_l = target_stp.location_idx();
                           auto const target_arr_mam = tt_.event_mam(r, t, target_idx, event_type::kArr);
