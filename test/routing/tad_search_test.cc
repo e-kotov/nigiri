@@ -36,7 +36,7 @@ void verify_tad_raptor_equivalence(timetable const& tt, std::string const& start
   // 1. Run TAD
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts);
+  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   
   auto const base = tt.internal_interval_days().from_;
   auto const start_delta = unix_to_delta(base, start_time);
@@ -264,7 +264,7 @@ TEST(routing, tad_walking_transfer_improvement) {
   
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts);
+  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
   auto const base = tt.internal_interval_days().from_;
   
@@ -321,7 +321,7 @@ TEST(routing, tad_deterministic_equal_time) {
   
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts);
+  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
   auto const base = tt.internal_interval_days().from_;
   search.execute({{start_loc, unix_to_delta(base, start_time)}});
@@ -355,7 +355,7 @@ TEST(routing, tad_same_station) {
   
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts);
+  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   
   auto const start_loc_it = tt.locations_.location_id_to_idx_.find({"0000001", src});
   ASSERT_NE(start_loc_it, tt.locations_.location_id_to_idx_.end());
@@ -408,7 +408,7 @@ TEST(routing, tad_zero_duration_transfer) {
 
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts);
+  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   search.execute({{start_loc, start_delta}});
   
   auto const dest_label = state.node_labels_[to_idx(dest_loc)];
@@ -493,7 +493,7 @@ TEST(routing, tad_multiple_starts_and_destinations) {
 
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts);
+  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   
   auto const base = tt.internal_interval_days().from_;
   auto const base_time = unixtime_t{sys_days{2020_y / March / 30}};
@@ -590,5 +590,150 @@ TEST(routing, tad_coordinate_offsets) {
       auto raptor_eat = raptor_res.journeys_->begin()->dest_time_;
       auto tad_eat = tad_res.journeys_->begin()->dest_time_;
       EXPECT_EQ(raptor_eat, tad_eat);
+  }
+}
+
+TEST(routing, tad_multiple_td_offsets) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000003 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00130                       %
+0000003 C                     00140                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  auto const start_loc_1 = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const start_loc_2 = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  
+  auto const base_time = unixtime_t{sys_days{2020_y / March / 30}} + 23_hours + 40_minutes;
+  
+  routing::query q;
+  q.start_time_ = interval{base_time, base_time + 2_hours};
+  
+  // Coordinate start: Multiple offsets to different stations
+  q.td_start_[start_loc_1] = {routing::td_offset{unixtime_t{0_minutes}, 10_minutes, 0U}};
+  q.td_start_[start_loc_2] = {routing::td_offset{unixtime_t{0_minutes}, 5_minutes, 0U}};
+  q.td_dest_[dest_loc] = {routing::td_offset{unixtime_t{0_minutes}, 15_minutes, 0U}};
+  
+  q.start_match_mode_ = routing::location_match_mode::kIntermodal;
+  q.dest_match_mode_ = routing::location_match_mode::kIntermodal;
+  
+  routing::search_state raptor_s_state;
+  routing::raptor_state raptor_r_state;
+  using raptor_algo_t = routing::raptor<direction::kForward, false, 0, routing::search_mode::kOneToOne>;
+  routing::routing_result raptor_res = routing::search<direction::kForward, raptor_algo_t>{
+      tt, nullptr, raptor_s_state, raptor_r_state, q, std::nullopt}.execute();
+      
+  routing::search_state tad_s_state;
+  routing::tad_state tad_t_state;
+  routing::routing_result tad_res = routing::tad_route(
+      tt, nullptr, tad_s_state, tad_t_state, q, direction::kForward);
+      
+  ASSERT_EQ(raptor_res.journeys_->empty(), tad_res.journeys_->empty());
+  if (!raptor_res.journeys_->empty()) {
+      EXPECT_EQ(raptor_res.journeys_->begin()->dest_time_, tad_res.journeys_->begin()->dest_time_);
+  }
+}
+
+TEST(routing, tad_time_varying_offsets) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000002 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00130                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const base_time = unixtime_t{sys_days{2020_y / March / 30}} + 23_hours + 40_minutes;
+  
+  routing::query q;
+  q.start_time_ = interval{base_time, base_time + 2_hours};
+  
+  // Coordinate start: Time-varying offsets
+  q.td_start_[start_loc] = {
+      routing::td_offset{unixtime_t{0_minutes}, 20_minutes, 0U},
+      routing::td_offset{base_time + 10_minutes, 5_minutes, 0U}
+  };
+  q.td_dest_[dest_loc] = {routing::td_offset{unixtime_t{0_minutes}, 15_minutes, 0U}};
+  
+  q.start_match_mode_ = routing::location_match_mode::kIntermodal;
+  q.dest_match_mode_ = routing::location_match_mode::kIntermodal;
+  
+  routing::search_state raptor_s_state;
+  routing::raptor_state raptor_r_state;
+  using raptor_algo_t = routing::raptor<direction::kForward, false, 0, routing::search_mode::kOneToOne>;
+  routing::routing_result raptor_res = routing::search<direction::kForward, raptor_algo_t>{
+      tt, nullptr, raptor_s_state, raptor_r_state, q, std::nullopt}.execute();
+      
+  routing::search_state tad_s_state;
+  routing::tad_state tad_t_state;
+  routing::routing_result tad_res = routing::tad_route(
+      tt, nullptr, tad_s_state, tad_t_state, q, direction::kForward);
+      
+  ASSERT_EQ(raptor_res.journeys_->empty(), tad_res.journeys_->empty());
+  if (!raptor_res.journeys_->empty()) {
+      EXPECT_EQ(raptor_res.journeys_->begin()->dest_time_, tad_res.journeys_->begin()->dest_time_);
+  }
+}
+
+TEST(routing, tad_mixed_static_td_offsets) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000003 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00130                       %
+0000003 C                     00140                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const dest_loc_td = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const base_time = unixtime_t{sys_days{2020_y / March / 30}} + 23_hours + 40_minutes;
+  
+  routing::query q;
+  q.start_time_ = interval{base_time, base_time + 2_hours};
+  
+  // Mixed static and td offsets for destinations
+  q.td_start_[start_loc] = {routing::td_offset{unixtime_t{0_minutes}, 10_minutes, 0U}};
+  q.destination_ = {{dest_loc, 0_minutes, 0U}}; // static dest
+  q.td_dest_[dest_loc_td] = {routing::td_offset{unixtime_t{0_minutes}, 15_minutes, 0U}};
+  
+  q.start_match_mode_ = routing::location_match_mode::kIntermodal;
+  q.dest_match_mode_ = routing::location_match_mode::kIntermodal;
+  
+  routing::search_state raptor_s_state;
+  routing::raptor_state raptor_r_state;
+  using raptor_algo_t = routing::raptor<direction::kForward, false, 0, routing::search_mode::kOneToOne>;
+  routing::routing_result raptor_res = routing::search<direction::kForward, raptor_algo_t>{
+      tt, nullptr, raptor_s_state, raptor_r_state, q, std::nullopt}.execute();
+      
+  routing::search_state tad_s_state;
+  routing::tad_state tad_t_state;
+  routing::routing_result tad_res = routing::tad_route(
+      tt, nullptr, tad_s_state, tad_t_state, q, direction::kForward);
+      
+  ASSERT_EQ(raptor_res.journeys_->empty(), tad_res.journeys_->empty());
+  if (!raptor_res.journeys_->empty()) {
+      EXPECT_EQ(raptor_res.journeys_->begin()->dest_time_, tad_res.journeys_->begin()->dest_time_);
   }
 }

@@ -1,0 +1,9 @@
+--- src/routing/tad_route.cc
++++ src/routing/tad_route.cc
+@@ -169,4 +169,7 @@
+         j.start_time_ = !j.legs_.empty() ? j.legs_.front().dep_time_ : start_time;
+         j.dest_time_ = !j.legs_.empty() ? j.legs_.back().arr_time_ : final_arrival;
++        
++        std::cout << "DEBUG: start_time_ = " << j.start_time_ << ", dest_time_ = " << j.dest_time_ 
++                  << ", duration = " << (j.dest_time_ - j.start_time_).count() << " mins\n";
+         j.transfers_ = dest_label.num_transfers_;

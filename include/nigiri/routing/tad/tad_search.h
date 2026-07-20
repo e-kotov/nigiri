@@ -27,8 +27,12 @@ struct tad_stats {
 };
 
 struct tad_search {
-  tad_search(timetable const& tt, tad_state& state, transfer_time_settings const& tts)
-      : tt_{tt}, state_{state}, transfer_time_settings_{tts} {
+  tad_search(timetable const& tt, tad_state& state, transfer_time_settings const& tts,
+             profile_idx_t prf_idx, clasz_mask_t allowed_claszes,
+             bool require_bike, bool require_car)
+      : tt_{tt}, state_{state}, transfer_time_settings_{tts},
+        prf_idx_{prf_idx}, allowed_claszes_{allowed_claszes},
+        require_bike_{require_bike}, require_car_{require_car} {
       auto const n_days = static_cast<unsigned>(tt_.internal_interval_days().size().count());
       state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size(), n_days);
   }
@@ -61,7 +65,7 @@ struct tad_search {
           }
           
           // --- Phase 1: Relax Footpaths (Walking Transfers) ---
-          auto const& fps = tt_.locations_.footpaths_out_[profile_idx_t{0}][l];
+          auto const& fps = tt_.locations_.footpaths_out_[prf_idx_][l];
           for (auto const& fp : fps) {
               ++stats_.relaxed_walking_edges_;
               auto const target = fp.target();
@@ -97,6 +101,10 @@ struct tad_search {
           auto const [board_day, board_mam] = split_day_mam(day_idx_t{0}, board_time);
           
           for (auto const& r : tt_.location_routes_[l]) {
+              auto const r_idx = cista::to_idx(r);
+              if (allowed_claszes_ != all_clasz_allowed() && !is_allowed(allowed_claszes_, tt_.route_clasz_[r])) continue;
+              if (require_bike_ && !tt_.route_bikes_allowed_.test(r_idx * 2) && !tt_.route_bikes_allowed_.test(r_idx * 2 + 1)) continue;
+              if (require_car_ && !tt_.route_cars_allowed_.test(r_idx * 2) && !tt_.route_cars_allowed_.test(r_idx * 2 + 1)) continue;
               ++stats_.scanned_routes_;
               auto const stop_seq = tt_.route_location_seq_[r];
               
@@ -166,8 +174,12 @@ private:
   timetable const& tt_;
   tad_state& state_;
   transfer_time_settings transfer_time_settings_;
-  std::priority_queue<tad_pq_label> pq_;
+  profile_idx_t prf_idx_{0};
+  clasz_mask_t allowed_claszes_{all_clasz_allowed()};
+  bool require_bike_{false};
+  bool require_car_{false};
   tad_stats stats_;
+  std::priority_queue<tad_pq_label> pq_;
 };
 
 } // namespace nigiri::routing
