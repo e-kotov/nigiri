@@ -8,6 +8,10 @@
 #include "nigiri/routing/tad/tad_search.h"
 #include "nigiri/routing/tad/tad_state.h"
 #include "nigiri/routing/tad/tad_reconstruct.h"
+#include "nigiri/routing/tad/tad_route.h"
+#include "nigiri/routing/search.h"
+#include "nigiri/routing/raptor/raptor.h"
+#include "nigiri/routing/raptor/raptor_state.h"
 #include "nigiri/routing/transfer_time_settings.h"
 #include "../raptor_search.h"
 #include "nigiri/timetable.h"
@@ -525,4 +529,66 @@ TEST(routing, tad_multiple_starts_and_destinations) {
       if (expected_d_arrival == kInvalidDelta<direction::kForward> || arr < expected_d_arrival) { expected_d_arrival = arr; }
   }
   EXPECT_EQ(dest2_label.arrival_time_, expected_d_arrival);
+}
+
+// Phase 2: Coordinate offsets / td_start_ and td_dest_
+TEST(routing, tad_coordinate_offsets) {
+  constexpr auto const services = R"(
+*Z 00001 80____       048 030                             %
+*A VE 0000001 0000002 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00100                %
+0000002 B                     00130                       %
+)";
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
+  finalize(tt);
+  
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  
+  auto const base_time = unixtime_t{sys_days{2020_y / March / 30}} + 23_hours + 40_minutes;
+  
+  routing::query q;
+  q.start_time_ = interval{base_time, base_time + 2_hours};
+  
+  // Coordinate start: 10 mins to walk to A
+  q.td_start_[start_loc] = {routing::td_offset{
+      unixtime_t{0_minutes}, 10_minutes, 0U
+  }};
+  
+  // Coordinate dest: 15 mins to walk from B
+  q.td_dest_[dest_loc] = {routing::td_offset{
+      unixtime_t{0_minutes}, 15_minutes, 0U
+  }};
+  
+  // Need to set intermodal match mode to insert the artificial leg
+  q.start_match_mode_ = routing::location_match_mode::kIntermodal;
+  q.dest_match_mode_ = routing::location_match_mode::kIntermodal;
+  
+  // 1. Run RAPTOR
+  routing::search_state raptor_s_state;
+  routing::raptor_state raptor_r_state;
+  // RAPTOR API usually uses search template directly or a wrapper, we'll use raptor_search
+  // wait, raptor_search in test wrapper uses start_id not td_start_.
+  // We can just call routing::search directly.
+  using raptor_algo_t = routing::raptor<direction::kForward, false, 0, routing::search_mode::kOneToOne>;
+  routing::routing_result raptor_res = routing::search<direction::kForward, raptor_algo_t>{
+      tt, nullptr, raptor_s_state, raptor_r_state, q, std::nullopt}.execute();
+      
+  // 2. Run TAD
+  routing::search_state tad_s_state;
+  routing::tad_state tad_t_state;
+  routing::routing_result tad_res = routing::tad_route(
+      tt, nullptr, tad_s_state, tad_t_state, q, direction::kForward);
+      
+  // 3. Compare EAT
+  ASSERT_EQ(raptor_res.journeys_->empty(), tad_res.journeys_->empty());
+  if (!raptor_res.journeys_->empty()) {
+      auto raptor_eat = raptor_res.journeys_->begin()->dest_time_;
+      auto tad_eat = tad_res.journeys_->begin()->dest_time_;
+      EXPECT_EQ(raptor_eat, tad_eat);
+  }
 }
