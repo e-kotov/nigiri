@@ -11,9 +11,9 @@
 #include "nigiri/logging.h"
 #include "nigiri/qa/qa.h"
 #include "nigiri/query_generator/generator.h"
+#include "nigiri/routing/tad/tad_route.h"
 #include "nigiri/routing/tad/tad_search.h"
 #include "nigiri/routing/tad/tad_state.h"
-#include "nigiri/routing/transfer_time_settings.h"
 #include "nigiri/routing/search.h"
 #include "nigiri/timetable.h"
 #include "nigiri/types.h"
@@ -120,27 +120,40 @@ void process_queries(
     auto const progress_tracker = utl::activate_progress_tracker("benchmark");
     utl::get_global_progress_trackers().silent_ = false;
     progress_tracker->status("processing queries").in_high(queries.size());
-    struct query_state { routing::tad_state ts_; };
+    struct query_state {
+      routing::search_state ss_;
+      routing::tad_state ts_;
+    };
     utl::parallel_for_run_threadlocal<query_state>(
         queries.size(), [&](auto& query_state, auto const q_idx) {
           try {
             auto const total_time_start = std::chrono::steady_clock::now();
-            
-            routing::transfer_time_settings tts;
-            routing::tad_search search(tt, query_state.ts_, tts);
-            auto const& q = queries[q_idx].q_;
-            if (q.start_.empty()) return;
-            auto const start_l = q.start_[0].target_;
-            auto const start_time = std::holds_alternative<unixtime_t>(q.start_time_) 
-              ? std::get<unixtime_t>(q.start_time_) 
-              : std::get<interval<unixtime_t>>(q.start_time_).from_;
-            auto const stats = search.execute(start_l, unix_to_delta(tt.internal_interval_days().from_, start_time));
-            
+            auto const result = routing::tad_route(
+                tt, nullptr, query_state.ss_, query_state.ts_, queries[q_idx].q_,
+                direction::kForward);
             auto const total_time_stop = std::chrono::steady_clock::now();
+            auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(total_time_stop - total_time_start);
+            auto const stats = routing::tad_stats{
+                result.algo_stats_.at("tad_settled_stop_labels"),
+                result.algo_stats_.at("tad_scanned_routes"),
+                result.algo_stats_.at("tad_scanned_stop_events"),
+                result.algo_stats_.at("tad_relaxed_walking_edges"),
+                result.algo_stats_.at("tad_pruned_scans"),
+                result.algo_stats_.at("tad_queue_updates")};
             auto const guard = std::lock_guard{mutex};
+            if (elapsed >= std::chrono::seconds{5}) {
+              std::cout << "TAD_SLOW_QUERY q_idx=" << q_idx
+                        << " elapsed_ms=" << elapsed.count()
+                        << " settled=" << stats.settled_stop_labels_
+                        << " routes=" << stats.scanned_routes_
+                        << " stop_events=" << stats.scanned_stop_events_
+                        << " walking=" << stats.relaxed_walking_edges_
+                        << " pruned=" << stats.pruned_scans_
+                        << " queue_updates=" << stats.queue_updates_ << "\n";
+            }
             results.emplace_back(benchmark_result{
                 q_idx,
-                std::chrono::duration_cast<std::chrono::milliseconds>(total_time_stop - total_time_start),
+                elapsed,
                 stats});
             progress_tracker->increment();
           } catch (std::exception const& e) {
@@ -179,12 +192,16 @@ void print_result(std::vector<benchmark_result> const& var,
 }
 
 void print_results(
-    std::vector<nigiri::query_generation::start_dest_query> const& queries,
+    std::vector<nigiri::query_generation::start_dest_query> const&,
     std::vector<benchmark_result>& results,
-    nigiri::timetable const& tt,
-    nigiri::query_generation::generator_settings const& gs,
-    std::filesystem::path const& tt_path) {
-  }
+    nigiri::timetable const&,
+    nigiri::query_generation::generator_settings const&,
+    std::filesystem::path const&) {
+  utl::sort(results, [](auto const& a, auto const& b) {
+    return a.total_time_ < b.total_time_;
+  });
+  print_result(results, "total_time");
+}
 
 void print_memory_usage() {
 #ifndef _WIN32
