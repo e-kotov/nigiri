@@ -77,11 +77,13 @@ routing_result tad_route(
             
         routing::journey j;
         auto curr = dest_loc;
-        while (true) {
+        for (auto i = 0U; i != t_state.node_labels_.size(); ++i) {
             auto const& label = t_state.node_labels_[cista::to_idx(curr)];
             if (label.parent_ == curr || label.parent_ == location_idx_t::invalid()) break;
             curr = label.parent_;
         }
+        auto const& best_start_label = t_state.node_labels_[cista::to_idx(curr)];
+        if (best_start_label.parent_ != curr && best_start_label.parent_ != location_idx_t::invalid()) return;
         auto best_start = curr;
         
         routing::tad_reconstruct_journey(tt, q.transfer_time_settings_, t_state, best_start, dest_loc, q.prf_idx_, search_base_date, search_base_day, j);

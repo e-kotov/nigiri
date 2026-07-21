@@ -739,6 +739,35 @@ TEST(routing, tad_mixed_static_td_offsets) {
   }
 }
 
+TEST(routing, tad_reconstruct_parent_cycle_guard) {
+  timetable tt;
+  routing::transfer_time_settings tts;
+  routing::tad_state state;
+  state.resize(3U, 0U, 1U);
+  state.next_start_time();
+
+  auto const a = location_idx_t{0U};
+  auto const b = location_idx_t{1U};
+  auto const c = location_idx_t{2U};
+  state.node_labels_[cista::to_idx(a)].time_stamp_ = state.current_time_stamp_;
+  state.node_labels_[cista::to_idx(a)].arrival_time_ = delta_t{0};
+  state.node_labels_[cista::to_idx(a)].parent_ = c;
+  state.node_labels_[cista::to_idx(a)].reached_by_walking_ = true;
+  state.node_labels_[cista::to_idx(b)].time_stamp_ = state.current_time_stamp_;
+  state.node_labels_[cista::to_idx(b)].arrival_time_ = delta_t{1};
+  state.node_labels_[cista::to_idx(b)].parent_ = c;
+  state.node_labels_[cista::to_idx(b)].reached_by_walking_ = true;
+  state.node_labels_[cista::to_idx(c)].time_stamp_ = state.current_time_stamp_;
+  state.node_labels_[cista::to_idx(c)].arrival_time_ = delta_t{2};
+  state.node_labels_[cista::to_idx(c)].parent_ = b;
+  state.node_labels_[cista::to_idx(c)].reached_by_walking_ = true;
+
+  routing::journey j;
+  EXPECT_THROW(routing::tad_reconstruct_journey(
+                   tt, tts, state, a, c, profile_idx_t{0}, sys_days{2020_y / March / 30}, day_idx_t{0}, j),
+               std::runtime_error);
+}
+
 TEST(routing, tad_adversarial_class_filter) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;

@@ -21,7 +21,7 @@ inline void tad_reconstruct_journey(timetable const& tt,
   auto curr_l = dest_l;
   bool const is_wheelchair = prf_idx == kWheelchairProfile;
   
-  while (curr_l != start_l && curr_l != location_idx_t::invalid()) {
+  for (auto i = 0U; i != state.node_labels_.size() && curr_l != start_l && curr_l != location_idx_t::invalid(); ++i) {
     auto const& lbl = state.node_labels_[cista::to_idx(curr_l)];
     if (lbl.time_stamp_ != state.current_time_stamp_) {
       throw std::runtime_error("TAD Reconstruct: broken path (timestamp mismatch)");
