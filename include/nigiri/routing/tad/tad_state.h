@@ -35,11 +35,13 @@ struct tad_state {
   tad_state& operator=(tad_state&&) = default;
   ~tad_state() = default;
 
-  tad_state& resize(unsigned n_locations, unsigned n_route_transports, unsigned n_days) {
+  tad_state& resize(unsigned n_locations, unsigned n_route_transports, unsigned n_days, unsigned n_rt_transports = 0) {
     n_locations_ = n_locations;
+    n_route_transports_ = n_route_transports;
     n_days_ = n_days;
+    n_rt_transports_ = n_rt_transports;
     node_labels_.resize(n_locations);
-    vehicle_labels_.resize(n_route_transports * n_days);
+    vehicle_labels_.resize(n_route_transports * n_days + n_rt_transports);
     return *this;
   }
 
@@ -55,7 +57,9 @@ struct tad_state {
   }
 
   unsigned n_locations_{0U};
+  unsigned n_route_transports_{0U};
   unsigned n_days_{0U};
+  unsigned n_rt_transports_{0U};
   std::uint16_t current_time_stamp_{0U};
 
   std::vector<tad_node_label> node_labels_;

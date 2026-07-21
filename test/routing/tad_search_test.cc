@@ -36,7 +36,7 @@ void verify_tad_raptor_equivalence(timetable const& tt, std::string const& start
   // 1. Run TAD
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
+  routing::tad_search search(tt, nullptr, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   
   auto const base = tt.internal_interval_days().from_;
   auto const start_delta = unix_to_delta(base, start_time);
@@ -72,7 +72,7 @@ void verify_tad_raptor_equivalence(timetable const& tt, std::string const& start
           << "TAD arrival: " << tad_arrival << ", RAPTOR arrival: " << raptor_arrival;
           
       routing::journey tad_journey;
-      routing::tad_reconstruct_journey(tt, tts, state, start_loc, dest_loc, base, tad_journey);
+      routing::tad_reconstruct_journey(tt, tts, state, start_loc, dest_loc, nigiri::profile_idx_t{0}, base, tad_journey);
       
       routing::journey const* best_raptor = nullptr;
       for (auto const& j : raptor_results) {
@@ -264,7 +264,7 @@ TEST(routing, tad_walking_transfer_improvement) {
   
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
+  routing::tad_search search(tt, nullptr, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
   auto const base = tt.internal_interval_days().from_;
   
@@ -321,7 +321,7 @@ TEST(routing, tad_deterministic_equal_time) {
   
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
+  routing::tad_search search(tt, nullptr, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}};
   auto const base = tt.internal_interval_days().from_;
   search.execute({{start_loc, unix_to_delta(base, start_time)}});
@@ -355,7 +355,7 @@ TEST(routing, tad_same_station) {
   
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
+  routing::tad_search search(tt, nullptr, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   
   auto const start_loc_it = tt.locations_.location_id_to_idx_.find({"0000001", src});
   ASSERT_NE(start_loc_it, tt.locations_.location_id_to_idx_.end());
@@ -408,7 +408,7 @@ TEST(routing, tad_zero_duration_transfer) {
 
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
+  routing::tad_search search(tt, nullptr, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   search.execute({{start_loc, start_delta}});
   
   auto const dest_label = state.node_labels_[to_idx(dest_loc)];
@@ -493,7 +493,7 @@ TEST(routing, tad_multiple_starts_and_destinations) {
 
   routing::transfer_time_settings tts;
   routing::tad_state state;
-  routing::tad_search search(tt, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
+  routing::tad_search search(tt, nullptr, state, tts, nigiri::profile_idx_t{0}, nigiri::routing::all_clasz_allowed(), false, false);
   
   auto const base = tt.internal_interval_days().from_;
   auto const base_time = unixtime_t{sys_days{2020_y / March / 30}};
@@ -790,7 +790,7 @@ TEST(routing, tad_adversarial_class_filter) {
     q.start_time_ = interval{base_time, base_time + 2_hours};
     q.start_ = {{start_loc, 0_minutes, 0U}};
     q.destination_ = {{dest_loc, 0_minutes, 0U}};
-    q.allowed_claszes_ = clasz_mask_t{1U << static_cast<std::size_t>(clasz::kRegional)};
+    q.allowed_claszes_ = nigiri::routing::clasz_mask_t{1U << static_cast<std::size_t>(clasz::kRegional)};
 
     routing::search_state r_s; routing::raptor_state r_r;
     using r_algo = routing::raptor<direction::kForward, false, 0, routing::search_mode::kOneToOne>;

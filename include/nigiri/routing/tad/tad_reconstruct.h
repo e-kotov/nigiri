@@ -15,7 +15,8 @@ inline void tad_reconstruct_journey(timetable const& tt,
                                     location_idx_t const start_l,
                                     location_idx_t const dest_l,
                                     profile_idx_t const prf_idx,
-                                    date::sys_days const base,
+                                    date::sys_days const search_base_date,
+                                    day_idx_t const search_base_day,
                                     journey& j) {
   auto curr_l = dest_l;
   bool const is_wheelchair = prf_idx == kWheelchairProfile;
@@ -41,8 +42,8 @@ inline void tad_reconstruct_journey(timetable const& tt,
       j.add(journey::leg{direction::kForward,
                          parent_l,
                          curr_l,
-                         delta_to_unix(base, dep_time),
-                         delta_to_unix(base, arr_time),
+                         delta_to_unix(search_base_date, dep_time),
+                         delta_to_unix(search_base_date, arr_time),
                          footpath{curr_l, duration_t{static_cast<std::int16_t>(arr_time - dep_time)}}});
     } else {
       // Transport leg
@@ -57,7 +58,7 @@ inline void tad_reconstruct_journey(timetable const& tt,
       for (unsigned i = 0; i < seq.size(); ++i) {
         if (stop{seq[i]}.location_idx() == parent_l && stop{seq[i]}.can_start<direction::kForward>(is_wheelchair)) {
           auto const dep_mam = tt.event_mam(r, t, i, event_type::kDep);
-          auto const event_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{dep_mam.count()});
+          auto const event_time = tt_to_delta(search_base_day, start_day, minutes_after_midnight_t{dep_mam.count()});
           if (event_time >= dep_time) {
             board_stop_idx = static_cast<stop_idx_t>(i);
             actual_board_time = event_time;
@@ -67,11 +68,12 @@ inline void tad_reconstruct_journey(timetable const& tt,
       }
       
       stop_idx_t alight_stop_idx = 0;
+      delta_t actual_arr_time = kInvalidDelta<direction::kForward>;
       for (unsigned i = board_stop_idx + 1; i < seq.size(); ++i) {
         if (stop{seq[i]}.location_idx() == curr_l && stop{seq[i]}.can_finish<direction::kForward>(is_wheelchair)) {
           auto const arr_mam = tt.event_mam(r, t, i, event_type::kArr);
-          auto const event_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{arr_mam.count()});
-          if (event_time == arr_time) {
+          actual_arr_time = tt_to_delta(search_base_day, start_day, minutes_after_midnight_t{arr_mam.count()});
+          if (actual_arr_time >= arr_time) {
             alight_stop_idx = static_cast<stop_idx_t>(i);
             break;
           }
@@ -84,8 +86,8 @@ inline void tad_reconstruct_journey(timetable const& tt,
       j.add(journey::leg{direction::kForward,
                          parent_l,
                          curr_l,
-                         delta_to_unix(base, actual_board_time),
-                         delta_to_unix(base, arr_time),
+                         delta_to_unix(search_base_date, actual_board_time),
+                         delta_to_unix(search_base_date, actual_arr_time),
                          journey::run_enter_exit{r_run, board_stop_idx, alight_stop_idx}});
                          
       // Self-transfer check

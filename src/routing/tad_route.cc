@@ -7,7 +7,6 @@
 #include "utl/overloaded.h"
 #include "date/date.h"
 #include "nigiri/routing/raptor/reconstruct.h"
-#include "date/date.h"
 
 namespace nigiri::routing {
 
@@ -33,8 +32,9 @@ routing_result tad_route(
         start_time = std::get<unixtime_t>(q.start_time_);
     }
 
-    auto const base = tt.internal_interval_days().from_;
-    auto const start_delta = unix_to_delta(base, start_time);
+    auto const search_base_day = tt.day_idx(std::chrono::time_point_cast<date::days>(start_time));
+    auto const search_base_date = tt.internal_interval_days().from_ + search_base_day.v_ * date::days{1};
+    auto const start_delta = unix_to_delta(search_base_date, start_time);
     
     std::vector<std::pair<location_idx_t, delta_t>> starts;
     for (auto const& l : q.start_) {
@@ -49,9 +49,9 @@ routing_result tad_route(
 
     auto processing_start_time = std::chrono::steady_clock::now();
 
-    routing::tad_search search(tt, t_state, q.transfer_time_settings_,
+    routing::tad_search search(tt, rtt, t_state, q.transfer_time_settings_,
                                q.prf_idx_, q.allowed_claszes_,
-                               q.require_bike_transport_, q.require_car_transport_);
+                               q.require_bike_transport_, q.require_car_transport_, search_base_day);
     auto stats = search.execute(starts);
 
     auto execution_duration = std::chrono::steady_clock::now() - processing_start_time;
@@ -84,7 +84,7 @@ routing_result tad_route(
         }
         auto best_start = curr;
         
-        routing::tad_reconstruct_journey(tt, q.transfer_time_settings_, t_state, best_start, dest_loc, q.prf_idx_, base, j);
+        routing::tad_reconstruct_journey(tt, q.transfer_time_settings_, t_state, best_start, dest_loc, q.prf_idx_, search_base_date, search_base_day, j);
         
         offset start_match = offset{location_idx_t::invalid(), duration_t{0}, 0};
         bool has_start_match = false;
@@ -129,7 +129,6 @@ routing_result tad_route(
         optimize_footpaths<direction::kForward>(tt, rtt, q, j);
         
         // Ensure transfers reflects the final legs array
-        j.transfers_ = j.legs_.empty() ? 0 : static_cast<std::uint8_t>(j.legs_.size() - 1);
         j.transfers_ = j.legs_.empty() ? 0 : static_cast<std::uint8_t>(j.legs_.size() - 1);
         s_state.results_.add(std::move(j));
     };

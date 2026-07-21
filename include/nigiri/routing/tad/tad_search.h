@@ -6,6 +6,7 @@
 #include "nigiri/routing/transfer_time_settings.h"
 #include "nigiri/routing/get_earliest_transport.h"
 #include "nigiri/timetable.h"
+#include "nigiri/rt/rt_timetable.h"
 
 namespace nigiri::routing {
 
@@ -27,14 +28,15 @@ struct tad_stats {
 };
 
 struct tad_search {
-  tad_search(timetable const& tt, tad_state& state, transfer_time_settings const& tts,
+  tad_search(timetable const& tt, rt_timetable const* rtt, tad_state& state, transfer_time_settings const& tts,
              profile_idx_t prf_idx, clasz_mask_t allowed_claszes,
-             bool require_bike, bool require_car)
-      : tt_{tt}, state_{state}, transfer_time_settings_{tts},
+             bool require_bike, bool require_car, day_idx_t search_base_day_idx = day_idx_t{0})
+      : tt_{tt}, rtt_{rtt}, state_{state}, transfer_time_settings_{tts},
         prf_idx_{prf_idx}, allowed_claszes_{allowed_claszes},
-        require_bike_{require_bike}, require_car_{require_car} {
+        require_bike_{require_bike}, require_car_{require_car},
+        search_base_day_idx_{search_base_day_idx} {
       auto const n_days = static_cast<unsigned>(tt_.internal_interval_days().size().count());
-      state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size(), n_days);
+      state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size(), n_days, rtt_ ? rtt_->n_rt_transports() : 0U);
   }
 
   tad_stats execute(std::vector<std::pair<location_idx_t, delta_t>> const& starts) {
@@ -98,7 +100,7 @@ struct tad_search {
           auto const min_transfer = tt_.locations_.transfer_time_[l].count();
           auto const transfer_time = is_initial ? 0 : adjusted_transfer_time(transfer_time_settings_, min_transfer);
           auto const board_time = current_time + transfer_time;
-          auto const [board_day, board_mam] = split_day_mam(day_idx_t{0}, board_time);
+          auto const [board_day, board_mam] = split_day_mam(search_base_day_idx_, board_time);
           
           for (auto const& r : tt_.location_routes_[l]) {
               auto const r_idx = cista::to_idx(r);
@@ -115,7 +117,11 @@ struct tad_search {
                       continue;
                   }
                   
-                  auto const trans = get_earliest_transport<direction::kForward>(
+                  auto const trans = rtt_ ? get_earliest_transport<direction::kForward>(
+                      tt_, *rtt_, 0U, r, stop_idx, board_day, 
+                      minutes_after_midnight_t{board_mam.count()}, l,
+                      [](day_idx_t, delta_t) { return false; })
+                                          : get_earliest_transport<direction::kForward>(
                       tt_, tt_, 0U, r, stop_idx, board_day, 
                       minutes_after_midnight_t{board_mam.count()}, l,
                       [](day_idx_t, delta_t) { return false; });
@@ -131,8 +137,7 @@ struct tad_search {
                       }
                       auto& v_label = state_.vehicle_labels_[v_label_idx];
                       auto const actual_board_mam = tt_.event_mam(r, t, stop_idx, event_type::kDep);
-                      auto const actual_board_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{actual_board_mam.count()});
-                      
+                      auto const actual_board_time = tt_to_delta(search_base_day_idx_, start_day, minutes_after_midnight_t{actual_board_mam.count()});
                       if (v_label.time_stamp_ == state_.current_time_stamp_ && v_label.arrival_time_ <= actual_board_time) {
                           ++stats_.pruned_scans_;
                           continue; // Pruned by VLabel
@@ -162,8 +167,8 @@ struct tad_search {
                           if (!target_stp.can_finish<direction::kForward>(is_wheelchair)) continue;
                           
                           auto const target_l = target_stp.location_idx();
-                          auto const target_arr_mam = tt_.event_mam(r, t, target_idx, event_type::kArr);
-                          auto const arr_time = tt_to_delta(day_idx_t{0}, start_day, minutes_after_midnight_t{target_arr_mam.count()});
+                          auto const arr_mam = tt_.event_mam(r, t, target_idx, event_type::kArr);
+                          auto const arr_time = tt_to_delta(search_base_day_idx_, start_day, minutes_after_midnight_t{arr_mam.count()});
                               
                           auto& target_label = state_.node_labels_[cista::to_idx(target_l)];
                           if (target_label.time_stamp_ != state_.current_time_stamp_ || arr_time < target_label.arrival_time_) {
@@ -181,12 +186,96 @@ struct tad_search {
                   }
               }
           }
+          
+          // --- Phase 3: Scan RT Transports ---
+          if (rtt_ != nullptr) {
+              for (auto const& rt_t : rtt_->location_rt_transports_[l]) {
+                  auto const rt_t_idx = cista::to_idx(rt_t);
+                  if (allowed_claszes_ != all_clasz_allowed() && !is_allowed(allowed_claszes_, rtt_->rt_transport_section_clasz_[rt_t][0])) continue;
+                  
+                  if (require_bike_) {
+                      auto const bikes_all = rtt_->rt_transport_bikes_allowed_.test(rt_t_idx * 2);
+                      auto const bikes_some = rtt_->rt_transport_bikes_allowed_.test(rt_t_idx * 2 + 1);
+                      if (!bikes_all && !bikes_some) continue;
+                  }
+                  if (require_car_) {
+                      auto const cars_all = rtt_->rt_transport_cars_allowed_.test(rt_t_idx * 2);
+                      auto const cars_some = rtt_->rt_transport_cars_allowed_.test(rt_t_idx * 2 + 1);
+                      if (!cars_all && !cars_some) continue;
+                  }
+                  
+                  ++stats_.scanned_routes_;
+                  auto const stop_seq = rtt_->rt_transport_location_seq_[rt_t];
+                  bool const is_wheelchair = prf_idx_ == kWheelchairProfile;
+                  
+                  for (unsigned stop_idx = 0; stop_idx < stop_seq.size(); ++stop_idx) {
+                      auto const stp = stop(stop_seq[stop_idx]);
+                      if (cista::to_idx(stp.location_idx()) != cista::to_idx(l) || !stp.can_start<direction::kForward>(is_wheelchair)) {
+                          continue;
+                      }
+                      
+                      auto const day_offset = static_cast<int>(rtt_->base_day_idx_.v_) - static_cast<int>(search_base_day_idx_.v_);
+                      auto const board_event = static_cast<delta_t>(day_offset * 1440 + rtt_->rt_transport_stop_times_[rt_t][stop_idx * 2]);
+                      if (board_event < board_time) {
+                          continue;
+                      }
+                      
+                      auto const v_label_idx = (state_.n_route_transports_ * state_.n_days_) + rt_t_idx;
+                      auto& v_label = state_.vehicle_labels_[v_label_idx];
+                      if (v_label.time_stamp_ == state_.current_time_stamp_ && v_label.arrival_time_ <= board_event) {
+                          ++stats_.pruned_scans_;
+                          continue;
+                      }
+                      v_label.arrival_time_ = board_event;
+                      v_label.time_stamp_ = state_.current_time_stamp_;
+                      
+                      for (unsigned target_idx = stop_idx + 1; target_idx < stop_seq.size(); ++target_idx) {
+                          ++stats_.scanned_stop_events_;
+                          
+                          if (require_bike_ && !rtt_->rt_transport_bikes_allowed_.test(rt_t_idx * 2)) {
+                              break;
+                          }
+                          if (require_car_ && !rtt_->rt_transport_cars_allowed_.test(rt_t_idx * 2)) {
+                              break;
+                          }
+
+                          auto const target_stp = stop(stop_seq[target_idx]);
+                          if (!target_stp.can_finish<direction::kForward>(is_wheelchair)) continue;
+                          
+                          auto const target_l = target_stp.location_idx();
+                          auto const day_offset = static_cast<int>(rtt_->base_day_idx_.v_) - static_cast<int>(search_base_day_idx_.v_);
+                          auto const arr_time = static_cast<delta_t>(day_offset * 1440 + rtt_->rt_transport_stop_times_[rt_t][target_idx * 2 - 1]);
+                          auto& target_label = state_.node_labels_[cista::to_idx(target_l)];
+                          if (target_label.time_stamp_ != state_.current_time_stamp_ || arr_time < target_label.arrival_time_) {
+                              target_label.arrival_time_ = arr_time;
+                              target_label.time_stamp_ = state_.current_time_stamp_;
+                              target_label.parent_ = l;
+                              
+                              auto const static_trans = rtt_->rt_transport_static_transport_[rt_t];
+                              if (holds_alternative<transport>(static_trans)) {
+                                  auto const t = static_trans.as<transport>();
+                                  target_label.parent_transport_ = t.t_idx_;
+                                  target_label.parent_day_ = t.day_;
+                              } else {
+                                  target_label.parent_transport_ = transport_idx_t::invalid();
+                                  target_label.parent_day_ = day_idx_t::invalid();
+                              }
+                              target_label.reached_by_walking_ = false;
+                              
+                              pq_.push(tad_pq_label{target_l, arr_time});
+                              ++stats_.queue_updates_;
+                          }
+                      }
+                  }
+              }
+          }
       }
       return stats_;
   }
 
 private:
   timetable const& tt_;
+  rt_timetable const* rtt_{nullptr};
   tad_state& state_;
   transfer_time_settings transfer_time_settings_;
   profile_idx_t prf_idx_{0};
@@ -195,6 +284,7 @@ private:
   bool require_car_{false};
   tad_stats stats_;
   std::priority_queue<tad_pq_label> pq_;
+  day_idx_t search_base_day_idx_{0};
 };
 
 } // namespace nigiri::routing
