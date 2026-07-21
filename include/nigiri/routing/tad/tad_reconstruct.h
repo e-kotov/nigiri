@@ -109,7 +109,7 @@ inline void tad_reconstruct_journey(timetable const& tt,
   }
   
   if (curr_l != start_l) {
-    throw std::runtime_error("TAD Reconstruct: failed to reach start location");
+    throw std::runtime_error("TAD Reconstruct: parent cycle detected");
   }
   
   // The journey was reconstructed backwards, so reverse it
