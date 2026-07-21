@@ -98,9 +98,9 @@ inline void tad_reconstruct_journey(timetable const& tt,
               j.add(journey::leg{direction::kForward,
                                  parent_l,
                                  parent_l,
-                                 delta_to_unix(base, dep_time),
-                                 delta_to_unix(base, dep_time + transfer_dur),
-                                 footpath{parent_l, duration_t{transfer_dur}}});
+                                 delta_to_unix(search_base_date, dep_time),
+                                 delta_to_unix(search_base_date, static_cast<delta_t>(dep_time + transfer_dur)),
+                                 footpath{parent_l, duration_t{static_cast<std::int16_t>(transfer_dur)}}});
           }
       }
     }
