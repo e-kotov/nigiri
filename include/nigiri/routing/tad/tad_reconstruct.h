@@ -48,7 +48,13 @@ inline void tad_reconstruct_journey(timetable const& tt,
     } else {
       // Transport leg
       auto const t = lbl.parent_transport_;
+      if (t == transport_idx_t::invalid()) {
+        throw std::runtime_error("TAD Reconstruct: invalid parent transport");
+      }
       auto const start_day = lbl.parent_day_;
+      if (start_day == day_idx_t::invalid()) {
+        throw std::runtime_error("TAD Reconstruct: invalid parent day");
+      }
       auto const r = tt.transport_route_[t];
       auto const seq = tt.route_location_seq_[r];
       
@@ -78,6 +84,11 @@ inline void tad_reconstruct_journey(timetable const& tt,
             break;
           }
         }
+      }
+
+      if (actual_board_time == kInvalidDelta<direction::kForward> ||
+          actual_arr_time == kInvalidDelta<direction::kForward>) {
+        throw std::runtime_error("TAD Reconstruct: unresolved board or alight time");
       }
       
       rt::run r_run{.t_ = transport{t, start_day},
@@ -112,7 +123,6 @@ inline void tad_reconstruct_journey(timetable const& tt,
     throw std::runtime_error("TAD Reconstruct: parent cycle detected");
   }
   
-  // The journey was reconstructed backwards, so reverse it
   std::reverse(j.legs_.begin(), j.legs_.end());
 }
 

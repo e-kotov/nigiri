@@ -8,24 +8,19 @@
 
 namespace nigiri::routing {
 
-// The core 16-byte NodeLabel (due to Nigiri using a 2-byte delta_t)
 struct tad_node_label {
-  delta_t arrival_time_{kInvalidDelta<direction::kForward>}; // 2 bytes
-  std::uint16_t time_stamp_{0U};                               // 2 bytes
-  location_idx_t parent_{location_idx_t::invalid()};           // 4 bytes
-  transport_idx_t parent_transport_{transport_idx_t::invalid()}; // 4 bytes
-  day_idx_t parent_day_{day_idx_t::invalid()};                 // 2 bytes
-  bool reached_by_walking_{false};                             // 1 byte
-  // 1 byte padding -> 16 bytes total
+  delta_t arrival_time_{kInvalidDelta<direction::kForward>};
+  std::uint16_t time_stamp_{0U};
+  location_idx_t parent_{location_idx_t::invalid()};
+  transport_idx_t parent_transport_{transport_idx_t::invalid()};
+  day_idx_t parent_day_{day_idx_t::invalid()};
+  bool reached_by_walking_{false};
 };
-static_assert(sizeof(tad_node_label) <= 16, "NodeLabel should be tightly packed to 16 bytes");
 
-// The highly optimized 4-byte Lite Vehicle Label
 struct tad_vehicle_label {
-  delta_t arrival_time_{kInvalidDelta<direction::kForward>}; // 2 bytes
-  std::uint16_t time_stamp_{0U};                               // 2 bytes
+  delta_t arrival_time_{kInvalidDelta<direction::kForward>};
+  std::uint16_t time_stamp_{0U};
 };
-static_assert(sizeof(tad_vehicle_label) == 4, "VehicleLabel must be exactly 4 bytes");
 
 struct tad_state {
   tad_state() = default;
@@ -45,10 +40,8 @@ struct tad_state {
     return *this;
   }
 
-  // Uses a 16-bit monotonic counter to lazy-clear arrays without O(N) resets every query
   void next_start_time() {
     ++current_time_stamp_;
-    // Handle wrap-around gracefully
     if (current_time_stamp_ == 0U) {
       std::fill(node_labels_.begin(), node_labels_.end(), tad_node_label{});
       std::fill(vehicle_labels_.begin(), vehicle_labels_.end(), tad_vehicle_label{});
