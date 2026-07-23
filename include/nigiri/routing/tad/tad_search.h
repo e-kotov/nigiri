@@ -123,9 +123,9 @@ private:
 
   bool exceeds_travel_time(delta_t const t) const {
     if (query_delta_ == kInvalidDelta<direction::kForward>) return false;
-    int const limit = fwd() ? static_cast<int>(query_delta_) + max_travel_time_.count()
-                            : static_cast<int>(query_delta_) - max_travel_time_.count();
-    return fwd() ? static_cast<int>(t) > limit : static_cast<int>(t) < limit;
+    auto const limit = fwd() ? static_cast<std::int64_t>(query_delta_) + max_travel_time_.count()
+                             : static_cast<std::int64_t>(query_delta_) - max_travel_time_.count();
+    return fwd() ? static_cast<std::int64_t>(t) > limit : static_cast<std::int64_t>(t) < limit;
   }
 
   delta_t add_duration(delta_t const t, duration_t const d) const {

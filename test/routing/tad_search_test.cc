@@ -793,3 +793,33 @@ TEST(routing, tad_adversarial_class_filter) {
   EXPECT_TRUE(reaches_dest(routing::all_clasz_allowed()));
   EXPECT_FALSE(reaches_dest(routing::to_mask(clasz::kShip)));
 }
+
+TEST(routing, tad_max_transfers_post_reconstruction_limitation) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
+  finalize(tt);
+
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000004", src});
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+
+  routing::query q;
+  q.start_time_ = start_time;
+  q.start_.push_back(routing::offset{start_loc, 0_minutes, 0});
+  q.destination_.push_back(routing::offset{dest_loc, 0_minutes, 0});
+  q.max_transfers_ = 0;
+
+  routing::search_state s_state;
+  routing::tad_state t_state;
+
+  auto const res = routing::tad_route(tt, nullptr, s_state, t_state, q, direction::kForward);
+
+  // Known limitation before Phase 7b:
+  // Single-criteria scalar TAD stores only the fastest label per location.
+  // Post-reconstruction filtering drops reconstructed journeys exceeding max_transfers_,
+  // which can result in 0 journeys returned if the fastest journey exceeded max_transfers_.
+  EXPECT_TRUE(res.journeys_->empty());
+}
+
