@@ -818,3 +818,54 @@ TEST(routing, tad_max_transfers_post_reconstruction_limitation) {
   EXPECT_TRUE(res.journeys_->empty());
 }
 
+TEST(routing, tad_interval_early_stop) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
+  finalize(tt);
+
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+  auto const end_time = start_time + 12_hours;
+
+  routing::query q;
+  q.start_time_ = interval<unixtime_t>{start_time, end_time};
+  q.start_.push_back(routing::offset{start_loc, 0_minutes, 0});
+  q.destination_.push_back(routing::offset{dest_loc, 0_minutes, 0});
+  q.min_connection_count_ = 1;
+
+  routing::search_state s_state;
+  routing::tad_state t_state;
+
+  auto const res = routing::tad_route(tt, nullptr, s_state, t_state, q, direction::kForward);
+  EXPECT_FALSE(res.journeys_->empty());
+  EXPECT_LE(res.journeys_->size(), 1U);
+}
+
+TEST(routing, tad_via_leg_destination_node_propagation) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
+  finalize(tt);
+
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const via_loc = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+
+  routing::query q;
+  q.start_time_ = start_time;
+  q.start_.push_back(routing::offset{start_loc, 0_minutes, 0});
+  q.destination_.push_back(routing::offset{dest_loc, 0_minutes, 0});
+  q.via_stops_.push_back(routing::via_stop{via_loc, 0_minutes});
+
+  routing::search_state s_state;
+  routing::tad_state t_state;
+
+  auto const res = routing::tad_route(tt, nullptr, s_state, t_state, q, direction::kForward);
+  EXPECT_FALSE(res.journeys_->empty());
+}
+

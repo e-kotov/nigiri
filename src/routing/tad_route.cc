@@ -102,31 +102,11 @@ routing_result tad_route(
             auto& current_state = (K == 0) ? t_state : states[leg_idx];
             bool const is_first_leg = (leg_idx == 0);
 
-            std::vector<bool> leg_is_dest(tt.n_locations(), false);
-            if (leg_idx < K) {
-                auto const& via = q.via_stops_[leg_idx];
-                for_each_meta(tt, location_match_mode::kEquivalent, via.location_, [&](location_idx_t const l) {
-                    if (cista::to_idx(l) < leg_is_dest.size()) leg_is_dest[cista::to_idx(l)] = true;
-                });
-            } else {
-                for (auto const& d : q.destination_) {
-                    for_each_meta(tt, location_match_mode::kEquivalent, d.target(), [&](location_idx_t const l) {
-                        if (cista::to_idx(l) < leg_is_dest.size()) leg_is_dest[cista::to_idx(l)] = true;
-                    });
-                }
-                for (auto const& [l, _] : q.td_dest_) {
-                    for_each_meta(tt, location_match_mode::kEquivalent, l, [&](location_idx_t const meta_l) {
-                        if (cista::to_idx(meta_l) < leg_is_dest.size()) leg_is_dest[cista::to_idx(meta_l)] = true;
-                    });
-                }
-            }
-
             routing::tad_search search(tt, rtt, current_state, q.transfer_time_settings_,
                                        q.prf_idx_, q.allowed_claszes_,
                                        q.require_bike_transport_, q.require_car_transport_,
                                        cur_search_base_day, search_dir, is_first_leg,
-                                       cur_query_delta, q.max_travel_time_, q.max_transfers_,
-                                       &leg_is_dest);
+                                       cur_query_delta, q.max_travel_time_, q.max_transfers_);
             auto const stats = search.execute(current_starts);
 
             total_stats.settled_stop_labels_ += stats.settled_stop_labels_;
@@ -480,13 +460,18 @@ routing_result tad_route(
 
             auto const target_connections = std::max(1U, q.min_connection_count_);
 
+            bool stop_interval_search = false;
             utl::equal_ranges_linear(
                 s_state.starts_,
                 [](start const& a, start const& b) {
                   return a.time_at_start_ == b.time_at_start_;
                 },
                 [&](auto&& from_it, auto&& to_it) {
+                    if (stop_interval_search) {
+                        return;
+                    }
                     if (!s_state.results_.empty() && (!is_interval_query || s_state.results_.size() >= target_connections)) {
+                        stop_interval_search = true;
                         return;
                     }
                     auto const batch_query_time = from_it->time_at_start_;

@@ -48,8 +48,7 @@ struct tad_search {
              bool is_first_leg = true,
              delta_t query_delta = kInvalidDelta<direction::kForward>,
              duration_t max_travel_time = kMaxTravelTime,
-             std::uint8_t max_transfers = kMaxTransfers,
-             std::vector<bool> const* is_dest = nullptr)
+             std::uint8_t max_transfers = kMaxTransfers)
       : tt_{tt},
         rtt_{rtt},
         state_{state},
@@ -64,7 +63,6 @@ struct tad_search {
         query_delta_{query_delta},
         max_travel_time_{max_travel_time},
         max_transfers_{max_transfers},
-        is_dest_{is_dest},
         pq_{tad_pq_cmp{search_dir}} {
     auto const n_days =
         static_cast<unsigned>(tt_.internal_interval_days().size().count());
@@ -183,9 +181,6 @@ private:
   void scan_routes(location_idx_t const l,
                    delta_t const current_time,
                    std::vector<std::pair<location_idx_t, delta_t>> const& starts) {
-    if (is_dest_ != nullptr && cista::to_idx(l) < is_dest_->size() && (*is_dest_)[cista::to_idx(l)]) {
-      return;
-    }
     auto const min_transfer = tt_.locations_.transfer_time_[l].count();
     auto const transfer_time = (is_first_leg_ && is_initial(l, current_time, starts))
                                    ? duration_t{0}
@@ -552,7 +547,6 @@ private:
   delta_t query_delta_{0};
   duration_t max_travel_time_{kMaxTravelTime};
   std::uint8_t max_transfers_{kMaxTransfers};
-  std::vector<bool> const* is_dest_{nullptr};
   std::priority_queue<tad_pq_label, std::vector<tad_pq_label>, tad_pq_cmp> pq_;
 };
 
