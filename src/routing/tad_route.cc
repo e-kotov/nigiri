@@ -366,20 +366,58 @@ routing_result tad_route(
             }
         };
 
+        delta_t min_dest_arr = invalid_delta;
+        if (!is_interval_query) {
+            for (auto const& dest_offset : q.destination_) {
+                for_each_meta(tt, q.dest_match_mode_, dest_offset.target(), [&](location_idx_t const dest_loc) {
+                    if (cista::to_idx(dest_loc) < state_final.node_labels_.size()) {
+                        auto const& lbl = state_final.node_labels_[cista::to_idx(dest_loc)];
+                        if (lbl.time_stamp_ == state_final.current_time_stamp_ && lbl.arrival_time_ != invalid_delta) {
+                            min_dest_arr = (min_dest_arr == invalid_delta)
+                                ? lbl.arrival_time_
+                                : (fwd ? std::min(min_dest_arr, lbl.arrival_time_) : std::max(min_dest_arr, lbl.arrival_time_));
+                        }
+                    }
+                });
+            }
+            for (auto const& [dest_loc, _] : q.td_dest_) {
+                if (cista::to_idx(dest_loc) < state_final.node_labels_.size()) {
+                    auto const& lbl = state_final.node_labels_[cista::to_idx(dest_loc)];
+                    if (lbl.time_stamp_ == state_final.current_time_stamp_ && lbl.arrival_time_ != invalid_delta) {
+                        min_dest_arr = (min_dest_arr == invalid_delta)
+                            ? lbl.arrival_time_
+                            : (fwd ? std::min(min_dest_arr, lbl.arrival_time_) : std::max(min_dest_arr, lbl.arrival_time_));
+                    }
+                }
+            }
+        }
+
+        auto const should_add_dest = [&](location_idx_t const dest_loc) {
+            if (cista::to_idx(dest_loc) >= state_final.node_labels_.size()) return false;
+            auto const& lbl = state_final.node_labels_[cista::to_idx(dest_loc)];
+            if (lbl.time_stamp_ != state_final.current_time_stamp_ || lbl.arrival_time_ == invalid_delta) return false;
+            if (!is_interval_query && min_dest_arr != invalid_delta) {
+                if (fwd && lbl.arrival_time_ > min_dest_arr) return false;
+                if (!fwd && lbl.arrival_time_ < min_dest_arr) return false;
+            }
+            return true;
+        };
+
         for (auto const& dest_offset : q.destination_) {
             for_each_meta(tt, q.dest_match_mode_, dest_offset.target(), [&](location_idx_t const dest_loc) {
-                add_journey_for_dest(dest_loc, dest_offset);
+                if (should_add_dest(dest_loc)) {
+                    add_journey_for_dest(dest_loc, dest_offset);
+                }
             });
         }
         for (auto const& [dest_loc, td_offsets] : q.td_dest_) {
-            if (cista::to_idx(dest_loc) >= state_final.node_labels_.size()) continue;
-            auto const& dest_label = state_final.node_labels_[cista::to_idx(dest_loc)];
-            if (dest_label.time_stamp_ != state_final.current_time_stamp_ || 
-                dest_label.arrival_time_ == invalid_delta) continue;
-            auto const core_arrival = cur_query_time + std::chrono::minutes{dest_label.arrival_time_ - cur_query_delta};
-            auto const dur_opt = get_td_duration(fwd ? direction::kBackward : direction::kForward, std::span{td_offsets}, core_arrival);
-            if (dur_opt.has_value()) {
-                add_journey_for_dest(dest_loc, offset{dest_loc, dur_opt->first, dur_opt->second.transport_mode_id_});
+            if (should_add_dest(dest_loc)) {
+                auto const& dest_label = state_final.node_labels_[cista::to_idx(dest_loc)];
+                auto const core_arrival = cur_query_time + std::chrono::minutes{dest_label.arrival_time_ - cur_query_delta};
+                auto const dur_opt = get_td_duration(fwd ? direction::kBackward : direction::kForward, std::span{td_offsets}, core_arrival);
+                if (dur_opt.has_value()) {
+                    add_journey_for_dest(dest_loc, offset{dest_loc, dur_opt->first, dur_opt->second.transport_mode_id_});
+                }
             }
         }
     };
