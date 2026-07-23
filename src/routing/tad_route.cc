@@ -503,6 +503,19 @@ routing_result tad_route(
         }
     }
 
+    utl::erase_duplicates(
+        s_state.results_.els_,
+        [](journey const& a, journey const& b) {
+            return std::tie(a.start_time_, a.dest_time_, a.transfers_, a.legs_) <
+                   std::tie(b.start_time_, b.dest_time_, b.transfers_, b.legs_);
+        },
+        [](journey const& a, journey const& b) {
+            return a.start_time_ == b.start_time_ &&
+                   a.dest_time_ == b.dest_time_ &&
+                   a.transfers_ == b.transfers_ &&
+                   a.legs_ == b.legs_;
+        });
+
     auto execution_duration = std::chrono::steady_clock::now() - processing_start_time;
 
     search_stats search_stats_out;
