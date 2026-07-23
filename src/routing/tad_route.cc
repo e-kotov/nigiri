@@ -463,9 +463,9 @@ routing_result tad_route(
     }
 
     if (!is_interval_query && s_state.results_.size() > 1) {
-        auto min_arr = std::min_element(begin(s_state.results_), end(s_state.results_),
+        auto min_arr = std::min_element(begin(s_state.results_.els_), end(s_state.results_.els_),
             [](journey const& a, journey const& b) { return a.dest_time_ < b.dest_time_; })->dest_time_;
-        utl::erase_if(s_state.results_, [&](journey const& j) { return j.dest_time_ > min_arr; });
+        utl::erase_if(s_state.results_.els_, [&](journey const& j) { return j.dest_time_ > min_arr; });
     }
 
     auto execution_duration = std::chrono::steady_clock::now() - processing_start_time;
