@@ -437,13 +437,15 @@ routing_result tad_route(
             std::sort(begin(s_state.starts_), end(s_state.starts_),
                       [&](start const& a, start const& b) { return fwd ? a < b : b < a; });
 
+            auto const target_connections = std::max(1U, q.min_connection_count_);
+
             utl::equal_ranges_linear(
                 s_state.starts_,
                 [](start const& a, start const& b) {
                   return a.time_at_start_ == b.time_at_start_;
                 },
                 [&](auto&& from_it, auto&& to_it) {
-                    if (s_state.results_.size() >= q.min_connection_count_) {
+                    if (s_state.results_.size() >= target_connections) {
                         return;
                     }
                     auto const batch_query_time = from_it->time_at_start_;
