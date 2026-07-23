@@ -110,12 +110,14 @@ routing_result tad_route(
                 });
             } else {
                 for (auto const& d : q.destination_) {
-                    for_each_meta(tt, q.dest_match_mode_, d.target(), [&](location_idx_t const l) {
+                    for_each_meta(tt, location_match_mode::kEquivalent, d.target(), [&](location_idx_t const l) {
                         if (cista::to_idx(l) < leg_is_dest.size()) leg_is_dest[cista::to_idx(l)] = true;
                     });
                 }
                 for (auto const& [l, _] : q.td_dest_) {
-                    if (cista::to_idx(l) < leg_is_dest.size()) leg_is_dest[cista::to_idx(l)] = true;
+                    for_each_meta(tt, location_match_mode::kEquivalent, l, [&](location_idx_t const meta_l) {
+                        if (cista::to_idx(meta_l) < leg_is_dest.size()) leg_is_dest[cista::to_idx(meta_l)] = true;
+                    });
                 }
             }
 
