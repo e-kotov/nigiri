@@ -425,6 +425,17 @@ routing_result tad_route(
             if (cista::to_idx(dest_loc) >= state_final.node_labels_.size()) return false;
             auto const& lbl = state_final.node_labels_[cista::to_idx(dest_loc)];
             if (lbl.time_stamp_ != state_final.current_time_stamp_ || lbl.arrival_time_ == invalid_delta) return false;
+
+            if (lbl.reached_by_walking_) {
+                auto const parent_l = lbl.parent_;
+                if (parent_l != location_idx_t::invalid() && cista::to_idx(parent_l) < state_final.node_labels_.size()) {
+                    auto const& parent_lbl = state_final.node_labels_[cista::to_idx(parent_l)];
+                    if (parent_lbl.time_stamp_ == state_final.current_time_stamp_ && parent_lbl.arrival_time_ == lbl.arrival_time_) {
+                        return false;
+                    }
+                }
+            }
+
             if (!is_interval_query && min_dest_arr != invalid_delta) {
                 auto const tot_arr = clamp(lbl.arrival_time_ + (fwd ? offset_dur.count() : -offset_dur.count()));
                 if (fwd && tot_arr > min_dest_arr) return false;
