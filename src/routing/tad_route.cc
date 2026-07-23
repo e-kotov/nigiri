@@ -384,35 +384,44 @@ routing_result tad_route(
         }
     };
 
-    s_state.starts_.clear();
-    get_starts(search_dir, tt, rtt, q.start_time_, q.start_, q.td_start_,
-               q.via_stops_, q.max_start_offset_, q.start_match_mode_,
-               q.use_start_footpaths_, s_state.starts_, true, q.prf_idx_,
-               q.transfer_time_settings_);
+    bool const is_interval_query = std::holds_alternative<nigiri::interval<unixtime_t>>(q.start_time_);
 
-    if (s_state.starts_.empty()) {
-        run_search_and_reconstruct(starts, query_time, search_base_day, search_base_date, query_delta);
+    if (is_interval_query) {
+        s_state.starts_.clear();
+        get_starts(search_dir, tt, rtt, q.start_time_, q.start_, q.td_start_,
+                   q.via_stops_, q.max_start_offset_, q.start_match_mode_,
+                   q.use_start_footpaths_, s_state.starts_, true, q.prf_idx_,
+                   q.transfer_time_settings_);
+
+        if (s_state.starts_.empty()) {
+            run_search_and_reconstruct(starts, query_time, search_base_day, search_base_date, query_delta);
+        } else {
+            std::sort(begin(s_state.starts_), end(s_state.starts_),
+                      [&](start const& a, start const& b) { return fwd ? a < b : b < a; });
+
+            utl::equal_ranges_linear(
+                s_state.starts_,
+                [](start const& a, start const& b) {
+                  return a.time_at_start_ == b.time_at_start_;
+                },
+                [&](auto&& from_it, auto&& to_it) {
+                    if (s_state.results_.size() >= q.min_connection_count_) {
+                        return;
+                    }
+                    auto const batch_query_time = from_it->time_at_start_;
+                    auto const batch_search_base_day = tt.day_idx(std::chrono::time_point_cast<date::days>(batch_query_time));
+                    auto const batch_search_base_date = tt.internal_interval_days().from_ + batch_search_base_day.v_ * date::days{1};
+                    auto const batch_query_delta = unix_to_delta(batch_search_base_date, batch_query_time);
+
+                    std::vector<std::pair<location_idx_t, delta_t>> batch_starts;
+                    for (auto const& s : it_range{from_it, to_it}) {
+                        batch_starts.emplace_back(s.stop_, unix_to_delta(batch_search_base_date, s.time_at_stop_));
+                    }
+                    run_search_and_reconstruct(batch_starts, batch_query_time, batch_search_base_day, batch_search_base_date, batch_query_delta);
+                });
+        }
     } else {
-        std::sort(begin(s_state.starts_), end(s_state.starts_),
-                  [&](start const& a, start const& b) { return fwd ? b < a : a < b; });
-
-        utl::equal_ranges_linear(
-            s_state.starts_,
-            [](start const& a, start const& b) {
-              return a.time_at_start_ == b.time_at_start_;
-            },
-            [&](auto&& from_it, auto&& to_it) {
-                auto const batch_query_time = from_it->time_at_start_;
-                auto const batch_search_base_day = tt.day_idx(std::chrono::time_point_cast<date::days>(batch_query_time));
-                auto const batch_search_base_date = tt.internal_interval_days().from_ + batch_search_base_day.v_ * date::days{1};
-                auto const batch_query_delta = unix_to_delta(batch_search_base_date, batch_query_time);
-
-                std::vector<std::pair<location_idx_t, delta_t>> batch_starts;
-                for (auto const& s : it_range{from_it, to_it}) {
-                    batch_starts.emplace_back(s.stop_, unix_to_delta(batch_search_base_date, s.time_at_stop_));
-                }
-                run_search_and_reconstruct(batch_starts, batch_query_time, batch_search_base_day, batch_search_base_date, batch_query_delta);
-            });
+        run_search_and_reconstruct(starts, query_time, search_base_day, search_base_date, query_delta);
     }
 
     auto execution_duration = std::chrono::steady_clock::now() - processing_start_time;
