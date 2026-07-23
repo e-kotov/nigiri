@@ -454,7 +454,7 @@ routing_result tad_route(
                   return a.time_at_start_ == b.time_at_start_;
                 },
                 [&](auto&& from_it, auto&& to_it) {
-                    if (s_state.results_.size() >= target_connections) {
+                    if (!s_state.results_.empty() && (!is_interval_query || s_state.results_.size() >= target_connections)) {
                         return;
                     }
                     auto const batch_query_time = from_it->time_at_start_;
