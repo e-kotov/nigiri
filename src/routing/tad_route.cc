@@ -390,7 +390,7 @@ routing_result tad_route(
                         auto const core_arrival = cur_query_time + std::chrono::minutes{lbl.arrival_time_ - cur_query_delta};
                         auto const dur_opt = get_td_duration(fwd ? direction::kBackward : direction::kForward, std::span{td_offsets}, core_arrival);
                         if (dur_opt.has_value()) {
-                            auto const tot_arr = clamp(lbl.arrival_time_ + (fwd ? dur_opt->first : -dur_opt->first));
+                            auto const tot_arr = clamp(lbl.arrival_time_ + (fwd ? dur_opt->first.count() : -dur_opt->first.count()));
                             min_dest_arr = (min_dest_arr == invalid_delta)
                                 ? tot_arr
                                 : (fwd ? std::min(min_dest_arr, tot_arr) : std::max(min_dest_arr, tot_arr));
