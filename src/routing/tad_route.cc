@@ -474,12 +474,13 @@ routing_result tad_route(
     }
 
     auto const target_count = std::max(1U, q.min_connection_count_);
-    if ((!is_interval_query || q.min_connection_count_ <= 1) && s_state.results_.size() > target_count) {
+    auto const effective_target = is_interval_query ? target_count : 1U;
+    if (s_state.results_.size() > effective_target) {
         auto min_arr = std::min_element(begin(s_state.results_.els_), end(s_state.results_.els_),
             [](journey const& a, journey const& b) { return a.arrival_time() < b.arrival_time(); })->arrival_time();
         utl::erase_if(s_state.results_.els_, [&](journey const& j) { return j.arrival_time() > min_arr; });
-        if (s_state.results_.els_.size() > target_count) {
-            s_state.results_.els_.resize(target_count);
+        if (s_state.results_.els_.size() > effective_target) {
+            s_state.results_.els_.resize(effective_target);
         }
     }
 
