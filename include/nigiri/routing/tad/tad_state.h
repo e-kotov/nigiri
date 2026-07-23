@@ -37,6 +37,8 @@ struct tad_state {
     n_rt_transports_ = n_rt_transports;
     node_labels_.resize(n_locations);
     vehicle_labels_.resize(n_route_transports * n_days + n_rt_transports);
+    is_target_.resize(n_locations, false);
+    target_offsets_.resize(n_locations, duration_t{0});
     return *this;
   }
 
@@ -57,6 +59,8 @@ struct tad_state {
 
   std::vector<tad_node_label> node_labels_;
   std::vector<tad_vehicle_label> vehicle_labels_;
+  std::vector<bool> is_target_;
+  std::vector<duration_t> target_offsets_;
 };
 
 }  // namespace nigiri::routing

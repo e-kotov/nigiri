@@ -102,12 +102,31 @@ routing_result tad_route(
             auto& current_state = (K == 0) ? t_state : states[leg_idx];
             bool const is_first_leg = (leg_idx == 0);
 
+            std::vector<std::pair<location_idx_t, duration_t>> current_targets;
+            bool enable_pruning = (leg_idx == K) && (is_interval_query || q.min_connection_count_ <= 1);
+            if (enable_pruning) {
+                for (auto const& dest_offset : q.destination_) {
+                    for_each_meta(tt, q.dest_match_mode_, dest_offset.target(), [&](location_idx_t const dest_loc) {
+                        current_targets.emplace_back(dest_loc, dest_offset.duration());
+                    });
+                }
+                for (auto const& [dest_loc, td_offsets] : q.td_dest_) {
+                    duration_t min_dur{std::numeric_limits<duration_t::rep>::max()};
+                    for (auto const& offset : td_offsets) {
+                        min_dur = std::min(min_dur, offset.duration());
+                    }
+                    if (min_dur.count() != std::numeric_limits<duration_t::rep>::max()) {
+                        current_targets.emplace_back(dest_loc, min_dur);
+                    }
+                }
+            }
+
             routing::tad_search search(tt, rtt, current_state, q.transfer_time_settings_,
                                        q.prf_idx_, q.allowed_claszes_,
                                        q.require_bike_transport_, q.require_car_transport_,
                                        cur_search_base_day, search_dir, is_first_leg,
                                        cur_query_delta, q.max_travel_time_, q.max_transfers_);
-            auto const stats = search.execute(current_starts);
+            auto const stats = search.execute(current_starts, current_targets);
 
             total_stats.settled_stop_labels_ += stats.settled_stop_labels_;
             total_stats.scanned_routes_ += stats.scanned_routes_;

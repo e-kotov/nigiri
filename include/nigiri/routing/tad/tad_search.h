@@ -70,9 +70,28 @@ struct tad_search {
                   rtt_ ? rtt_->n_rt_transports() : 0U);
   }
 
-  tad_stats execute(std::vector<std::pair<location_idx_t, delta_t>> const& starts) {
+  tad_stats execute(std::vector<std::pair<location_idx_t, delta_t>> const& starts,
+                    std::vector<std::pair<location_idx_t, duration_t>> const& targets = {}) {
     stats_ = tad_stats{};
     state_.next_start_time();
+    has_best_target_time_ = false;
+    best_target_time_ = kInvalidDelta<direction::kForward>;
+
+    for (auto const& [l, dur] : targets) {
+      auto const idx = cista::to_idx(l);
+      if (idx >= state_.is_target_.size()) {
+        state_.is_target_.resize(idx + 1, false);
+        state_.target_offsets_.resize(idx + 1, duration_t{0});
+      }
+      if (!state_.is_target_[idx]) {
+        state_.is_target_[idx] = true;
+        state_.target_offsets_[idx] = dur;
+      } else {
+        if (dur < state_.target_offsets_[idx]) {
+          state_.target_offsets_[idx] = dur;
+        }
+      }
+    }
 
     for (auto const& [start_l, start_time] : starts) {
       if (exceeds_travel_time(start_time)) continue;
@@ -86,11 +105,25 @@ struct tad_search {
         start_label.parent_ = start_l;
         start_label.reached_by_walking_ = false;
         start_label.parent_transport_ = transport_idx_t::invalid();
+
+        auto const s_idx = cista::to_idx(start_l);
+        if (s_idx < state_.is_target_.size() && state_.is_target_[s_idx]) {
+          auto const time_at_target = add_duration(start_time, state_.target_offsets_[s_idx]);
+          if (!has_best_target_time_ || better(time_at_target, best_target_time_)) {
+            best_target_time_ = time_at_target;
+            has_best_target_time_ = true;
+          }
+        }
       }
     }
 
     while (!pq_.empty()) {
       auto const current = pq_.top();
+
+      if (has_best_target_time_ && better_or_equal(best_target_time_, current.arr_)) {
+        break;
+      }
+
       pq_.pop();
       ++stats_.settled_stop_labels_;
 
@@ -106,6 +139,12 @@ struct tad_search {
       relax_footpaths(l, current_time);
       scan_routes(l, current_time, starts);
       scan_rt_transports(l, current_time, starts);
+    }
+    for (auto const& [l, dur] : targets) {
+      auto const idx = cista::to_idx(l);
+      if (idx < state_.is_target_.size()) {
+        state_.is_target_[idx] = false;
+      }
     }
     return stats_;
   }
@@ -151,6 +190,15 @@ private:
       target_label.reached_by_walking_ = reached_by_walking;
       pq_.push(tad_pq_label{target, time});
       ++stats_.queue_updates_;
+
+      auto const t_idx = cista::to_idx(target);
+      if (t_idx < state_.is_target_.size() && state_.is_target_[t_idx]) {
+        auto const time_at_target = add_duration(time, state_.target_offsets_[t_idx]);
+        if (!has_best_target_time_ || better(time_at_target, best_target_time_)) {
+          best_target_time_ = time_at_target;
+          has_best_target_time_ = true;
+        }
+      }
     }
   }
 
@@ -444,6 +492,15 @@ private:
       target_label.reached_by_walking_ = false;
       pq_.push(tad_pq_label{target, time});
       ++stats_.queue_updates_;
+
+      auto const t_idx = cista::to_idx(target);
+      if (t_idx < state_.is_target_.size() && state_.is_target_[t_idx]) {
+        auto const time_at_target = add_duration(time, state_.target_offsets_[t_idx]);
+        if (!has_best_target_time_ || better(time_at_target, best_target_time_)) {
+          best_target_time_ = time_at_target;
+          has_best_target_time_ = true;
+        }
+      }
     }
   }
 
@@ -548,6 +605,8 @@ private:
   duration_t max_travel_time_{kMaxTravelTime};
   std::uint8_t max_transfers_{kMaxTransfers};
   std::priority_queue<tad_pq_label, std::vector<tad_pq_label>, tad_pq_cmp> pq_;
+  bool has_best_target_time_{false};
+  delta_t best_target_time_{0};
 };
 
 }  // namespace nigiri::routing
