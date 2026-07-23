@@ -131,7 +131,7 @@ routing_result tad_route(
                     }
                 });
                 if (next_starts.empty()) {
-                    break;
+                    return;
                 }
                 current_starts = std::move(next_starts);
             }
