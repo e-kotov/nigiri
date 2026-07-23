@@ -89,6 +89,21 @@ routing_result tad_route(
     auto processing_start_time = std::chrono::steady_clock::now();
     tad_stats total_stats{};
 
+    int interval_length_in_days = 0;
+    if (is_interval_query) {
+        auto const start_interval = std::get<nigiri::interval<unixtime_t>>(q.start_time_);
+        interval_length_in_days = std::max(0, static_cast<int>((start_interval.to_ - start_interval.from_).count() / 1440));
+    }
+    auto const min_day = std::max(0, static_cast<int>(search_base_day.v_) - 3);
+    auto const max_day = std::min(static_cast<int>(kMaxDays - 1), static_cast<int>(search_base_day.v_) + 3 + interval_length_in_days);
+
+    bitfield search_mask;
+    for (int d = min_day; d <= max_day; ++d) {
+        search_mask.set(d);
+    }
+
+    std::vector<uint8_t> route_active(tt.n_routes(), 0);
+
     auto const run_search_and_reconstruct = [&](
         std::vector<std::pair<location_idx_t, delta_t>> const& initial_starts,
         unixtime_t const cur_query_time,
@@ -125,7 +140,8 @@ routing_result tad_route(
                                        q.prf_idx_, q.allowed_claszes_,
                                        q.require_bike_transport_, q.require_car_transport_,
                                        cur_search_base_day, search_dir, is_first_leg,
-                                       cur_query_delta, q.max_travel_time_, q.max_transfers_);
+                                       cur_query_delta, q.max_travel_time_, q.max_transfers_,
+                                       &route_active, search_mask);
             auto const stats = search.execute(current_starts, current_targets);
 
             total_stats.settled_stop_labels_ += stats.settled_stop_labels_;
@@ -134,6 +150,10 @@ routing_result tad_route(
             total_stats.relaxed_walking_edges_ += stats.relaxed_walking_edges_;
             total_stats.pruned_scans_ += stats.pruned_scans_;
             total_stats.queue_updates_ += stats.queue_updates_;
+            total_stats.time_pq_pop_us_ += stats.time_pq_pop_us_;
+            total_stats.time_footpaths_us_ += stats.time_footpaths_us_;
+            total_stats.time_routes_us_ += stats.time_routes_us_;
+            total_stats.time_rt_transports_us_ += stats.time_rt_transports_us_;
 
             if (leg_idx < K) {
                 std::vector<std::pair<location_idx_t, delta_t>> next_starts;
@@ -544,6 +564,10 @@ routing_result tad_route(
         {"tad_relaxed_walking_edges", total_stats.relaxed_walking_edges_},
         {"tad_pruned_scans", total_stats.pruned_scans_},
         {"tad_queue_updates", total_stats.queue_updates_},
+        {"tad_time_pq_pop_us", total_stats.time_pq_pop_us_},
+        {"tad_time_footpaths_us", total_stats.time_footpaths_us_},
+        {"tad_time_routes_us", total_stats.time_routes_us_},
+        {"tad_time_rt_transports_us", total_stats.time_rt_transports_us_},
         {"tad_engine_used", 1ULL}
     };
 

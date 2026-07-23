@@ -1,6 +1,10 @@
 #pragma once
 
+#include <chrono>
 #include <queue>
+#include <vector>
+
+#define NIGIRI_TAD_PROFILING 0
 #include <stdexcept>
 
 #include "nigiri/routing/get_earliest_transport.h"
@@ -32,6 +36,10 @@ struct tad_stats {
   std::uint64_t relaxed_walking_edges_{0};
   std::uint64_t pruned_scans_{0};
   std::uint64_t queue_updates_{0};
+  std::uint64_t time_pq_pop_us_{0};
+  std::uint64_t time_footpaths_us_{0};
+  std::uint64_t time_routes_us_{0};
+  std::uint64_t time_rt_transports_us_{0};
 };
 
 struct tad_search {
@@ -48,7 +56,9 @@ struct tad_search {
              bool is_first_leg = true,
              delta_t query_delta = kInvalidDelta<direction::kForward>,
              duration_t max_travel_time = kMaxTravelTime,
-             std::uint8_t max_transfers = kMaxTransfers)
+             std::uint8_t max_transfers = kMaxTransfers,
+             std::vector<uint8_t>* route_active = nullptr,
+             bitfield search_mask = {})
       : tt_{tt},
         rtt_{rtt},
         state_{state},
@@ -63,6 +73,8 @@ struct tad_search {
         query_delta_{query_delta},
         max_travel_time_{max_travel_time},
         max_transfers_{max_transfers},
+        route_active_{route_active},
+        search_mask_{search_mask},
         pq_{tad_pq_cmp{search_dir}} {
     auto const n_days =
         static_cast<unsigned>(tt_.internal_interval_days().size().count());
@@ -124,7 +136,14 @@ struct tad_search {
         break;
       }
 
+#if NIGIRI_TAD_PROFILING
+      auto const t0 = std::chrono::steady_clock::now();
+#endif
       pq_.pop();
+#if NIGIRI_TAD_PROFILING
+      auto const t1 = std::chrono::steady_clock::now();
+      stats_.time_pq_pop_us_ += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+#endif
       ++stats_.settled_stop_labels_;
 
       auto const l = current.l_;
@@ -136,9 +155,32 @@ struct tad_search {
         continue;
       }
 
+#if NIGIRI_TAD_PROFILING
+      auto const t2 = std::chrono::steady_clock::now();
+#endif
       relax_footpaths(l, current_time);
+#if NIGIRI_TAD_PROFILING
+      auto const t3 = std::chrono::steady_clock::now();
+      stats_.time_footpaths_us_ += std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
+#endif
+
+#if NIGIRI_TAD_PROFILING
+      auto const t4 = std::chrono::steady_clock::now();
+#endif
       scan_routes(l, current_time, starts);
+#if NIGIRI_TAD_PROFILING
+      auto const t5 = std::chrono::steady_clock::now();
+      stats_.time_routes_us_ += std::chrono::duration_cast<std::chrono::microseconds>(t5 - t4).count();
+#endif
+
+#if NIGIRI_TAD_PROFILING
+      auto const t6 = std::chrono::steady_clock::now();
+#endif
       scan_rt_transports(l, current_time, starts);
+#if NIGIRI_TAD_PROFILING
+      auto const t7 = std::chrono::steady_clock::now();
+      stats_.time_rt_transports_us_ += std::chrono::duration_cast<std::chrono::microseconds>(t7 - t6).count();
+#endif
     }
     for (auto const& [l, dur] : targets) {
       auto const idx = cista::to_idx(l);
@@ -240,6 +282,27 @@ private:
 
     for (auto const& r : tt_.location_routes_[l]) {
       auto const r_idx = cista::to_idx(r);
+      if (route_active_ != nullptr) {
+        auto& status = (*route_active_)[r_idx];
+        if (status == 0) {
+          bool active = false;
+          auto const transport_range = tt_.route_transport_ranges_[r];
+          for (auto const t : transport_range) {
+            bitfield_idx_t bf_idx;
+            if (rtt_ != nullptr) {
+                bf_idx = rtt_->transport_traffic_days_[t];
+                if ((rtt_->bitfields_[bf_idx] & search_mask_).any()) { active = true; break; }
+            } else {
+                bf_idx = tt_.transport_traffic_days_[t];
+                if ((tt_.bitfields_[bf_idx] & search_mask_).any()) { active = true; break; }
+            }
+          }
+          status = active ? 1 : 2;
+        }
+        if (status == 2) {
+          continue;
+        }
+      }
       if (allowed_claszes_ != all_clasz_allowed() &&
           !is_allowed(allowed_claszes_, tt_.route_clasz_[r])) {
         continue;
@@ -604,6 +667,8 @@ private:
   delta_t query_delta_{0};
   duration_t max_travel_time_{kMaxTravelTime};
   std::uint8_t max_transfers_{kMaxTransfers};
+  std::vector<uint8_t>* route_active_{nullptr};
+  bitfield search_mask_{};
   std::priority_queue<tad_pq_label, std::vector<tad_pq_label>, tad_pq_cmp> pq_;
   bool has_best_target_time_{false};
   delta_t best_target_time_{0};
