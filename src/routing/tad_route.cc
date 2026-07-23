@@ -473,12 +473,13 @@ routing_result tad_route(
         run_search_and_reconstruct(starts, query_time, search_base_day, search_base_date, query_delta);
     }
 
-    if (!is_interval_query && s_state.results_.size() > 1) {
+    auto const target_count = std::max(1U, q.min_connection_count_);
+    if ((!is_interval_query || q.min_connection_count_ <= 1) && s_state.results_.size() > target_count) {
         auto min_arr = std::min_element(begin(s_state.results_.els_), end(s_state.results_.els_),
             [](journey const& a, journey const& b) { return a.arrival_time() < b.arrival_time(); })->arrival_time();
         utl::erase_if(s_state.results_.els_, [&](journey const& j) { return j.arrival_time() > min_arr; });
-        if (s_state.results_.els_.size() > 1) {
-            s_state.results_.els_.resize(1);
+        if (s_state.results_.els_.size() > target_count) {
+            s_state.results_.els_.resize(target_count);
         }
     }
 
