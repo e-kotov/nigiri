@@ -815,11 +815,6 @@ TEST(routing, tad_max_transfers_post_reconstruction_limitation) {
   routing::tad_state t_state;
 
   auto const res = routing::tad_route(tt, nullptr, s_state, t_state, q, direction::kForward);
-
-  // Known limitation before Phase 7b:
-  // Single-criteria scalar TAD stores only the fastest label per location.
-  // Post-reconstruction filtering drops reconstructed journeys exceeding max_transfers_,
-  // which can result in 0 journeys returned if the fastest journey exceeded max_transfers_.
   EXPECT_TRUE(res.journeys_->empty());
 }
 
