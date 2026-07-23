@@ -552,8 +552,8 @@ private:
   delta_t query_delta_{0};
   duration_t max_travel_time_{kMaxTravelTime};
   std::uint8_t max_transfers_{kMaxTransfers};
-  std::priority_queue<tad_pq_label, std::vector<tad_pq_label>, tad_pq_cmp> pq_;
   std::vector<bool> const* is_dest_{nullptr};
+  std::priority_queue<tad_pq_label, std::vector<tad_pq_label>, tad_pq_cmp> pq_;
 };
 
 }  // namespace nigiri::routing
