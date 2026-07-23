@@ -33,8 +33,10 @@ routing_result tad_route(
     auto const fwd = search_dir == direction::kForward;
     auto const invalid_delta = fwd ? kInvalidDelta<direction::kForward> : kInvalidDelta<direction::kBackward>;
 
+    bool const is_interval_query = std::holds_alternative<nigiri::interval<unixtime_t>>(q.start_time_);
+
     unixtime_t query_time;
-    if (std::holds_alternative<nigiri::interval<unixtime_t>>(q.start_time_)) {
+    if (is_interval_query) {
         auto const start_interval = std::get<nigiri::interval<unixtime_t>>(q.start_time_);
         query_time = fwd ? start_interval.from_ : start_interval.to_ - duration_t{1};
     } else {
@@ -421,8 +423,6 @@ routing_result tad_route(
             }
         }
     };
-
-    bool const is_interval_query = std::holds_alternative<nigiri::interval<unixtime_t>>(q.start_time_);
 
     if (is_interval_query) {
         s_state.starts_.clear();
