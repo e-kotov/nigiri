@@ -494,8 +494,7 @@ routing_result tad_route(
         run_search_and_reconstruct(starts, query_time, search_base_day, search_base_date, query_delta);
     }
 
-    auto const target_count = std::max(1U, q.min_connection_count_);
-    auto const effective_target = is_interval_query ? target_count : 1U;
+    auto const effective_target = (is_interval_query && q.min_connection_count_ > 1) ? q.min_connection_count_ : 1U;
     if (s_state.results_.size() > effective_target) {
         auto min_arr = std::min_element(begin(s_state.results_.els_), end(s_state.results_.els_),
             [](journey const& a, journey const& b) { return a.arrival_time() < b.arrival_time(); })->arrival_time();
