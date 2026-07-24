@@ -869,3 +869,35 @@ TEST(routing, tad_via_leg_destination_node_propagation) {
   EXPECT_FALSE(res.journeys_->empty());
 }
 
+TEST(routing, tad_shortcut_transfer_provider) {
+  routing::tad_transfer_index idx;
+  idx.version_ = routing::tad_transfer_index::kVersion;
+  idx.n_locations_ = 10;
+  idx.profiles_.resize(1);
+
+  auto& prf = idx.profiles_[0];
+  prf.out_offsets_.resize(11, 0);
+  prf.in_offsets_.resize(11, 0);
+  prf.out_offsets_[1] = 0;
+  for (std::size_t i = 2; i <= 10; ++i) {
+    prf.out_offsets_[i] = 1;
+  }
+  prf.out_edges_.push_back(routing::tad_transfer_edge{location_idx_t{2}, duration_t{5}});
+
+  EXPECT_TRUE(idx.is_valid_for(profile_idx_t{0}));
+  EXPECT_FALSE(idx.is_valid_for(profile_idx_t{1}));
+
+  routing::shortcut_transfer_provider provider(prf);
+  std::vector<routing::tad_transfer_edge> edges;
+  provider.stop_transfers(location_idx_t{1}, true, edges);
+  ASSERT_EQ(1U, edges.size());
+  EXPECT_EQ(location_idx_t{2}, edges[0].target_);
+  EXPECT_EQ(duration_t{5}, edges[0].duration_);
+
+  edges.clear();
+  provider.stop_transfers(location_idx_t{1}, false, edges);
+  EXPECT_TRUE(edges.empty());
+
+  prf.out_offsets_[10] = 2;
+  EXPECT_FALSE(idx.is_valid_for(profile_idx_t{0}));
+}

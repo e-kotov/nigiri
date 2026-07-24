@@ -138,8 +138,13 @@ void process_queries(
                 result.algo_stats_.at("tad_scanned_routes"),
                 result.algo_stats_.at("tad_scanned_stop_events"),
                 result.algo_stats_.at("tad_relaxed_walking_edges"),
+                result.algo_stats_.at("tad_relaxed_transfers"),
                 result.algo_stats_.at("tad_pruned_scans"),
-                result.algo_stats_.at("tad_queue_updates")};
+                result.algo_stats_.at("tad_queue_updates"),
+                result.algo_stats_.at("tad_time_pq_pop_us"),
+                result.algo_stats_.at("tad_time_footpaths_us"),
+                result.algo_stats_.at("tad_time_routes_us"),
+                result.algo_stats_.at("tad_time_rt_transports_us")};
             auto const guard = std::lock_guard{mutex};
             if (elapsed >= std::chrono::seconds{5}) {
               std::cout << "TAD_SLOW_QUERY q_idx=" << q_idx
@@ -148,6 +153,7 @@ void process_queries(
                         << " routes=" << stats.scanned_routes_
                         << " stop_events=" << stats.scanned_stop_events_
                         << " walking=" << stats.relaxed_walking_edges_
+                        << " transfers=" << stats.relaxed_transfers_
                         << " pruned=" << stats.pruned_scans_
                         << " queue_updates=" << stats.queue_updates_ << "\n";
             }
@@ -431,22 +437,34 @@ int main(int argc, char* argv[]) {
 
   auto total = std::chrono::milliseconds{0U};
   routing::tad_stats total_stats;
+
   for (auto const& res : results) {
     total += res.total_time_;
     total_stats.settled_stop_labels_ += res.stats_.settled_stop_labels_;
     total_stats.scanned_routes_ += res.stats_.scanned_routes_;
     total_stats.scanned_stop_events_ += res.stats_.scanned_stop_events_;
     total_stats.relaxed_walking_edges_ += res.stats_.relaxed_walking_edges_;
+    total_stats.relaxed_transfers_ += res.stats_.relaxed_transfers_;
     total_stats.pruned_scans_ += res.stats_.pruned_scans_;
     total_stats.queue_updates_ += res.stats_.queue_updates_;
+    total_stats.time_pq_pop_us_ += res.stats_.time_pq_pop_us_;
+    total_stats.time_footpaths_us_ += res.stats_.time_footpaths_us_;
+    total_stats.time_routes_us_ += res.stats_.time_routes_us_;
+    total_stats.time_rt_transports_us_ += res.stats_.time_rt_transports_us_;
   }
+
   std::cout << "AVG: " << (static_cast<double>(total.count()) / results.size()) << "ms\n";
   std::cout << "AVG Settled Stop Labels: " << (static_cast<double>(total_stats.settled_stop_labels_) / results.size()) << "\n";
   std::cout << "AVG Scanned Routes: " << (static_cast<double>(total_stats.scanned_routes_) / results.size()) << "\n";
   std::cout << "AVG Scanned Stop Events: " << (static_cast<double>(total_stats.scanned_stop_events_) / results.size()) << "\n";
   std::cout << "AVG Relaxed Walking Edges: " << (static_cast<double>(total_stats.relaxed_walking_edges_) / results.size()) << "\n";
+  std::cout << "AVG Relaxed Transfers: " << (static_cast<double>(total_stats.relaxed_transfers_) / results.size()) << "\n";
   std::cout << "AVG Pruned Scans: " << (static_cast<double>(total_stats.pruned_scans_) / results.size()) << "\n";
   std::cout << "AVG Queue Updates: " << (static_cast<double>(total_stats.queue_updates_) / results.size()) << "\n";
+  std::cout << "AVG Time PQ Pop (us): " << (static_cast<double>(total_stats.time_pq_pop_us_) / results.size()) << "\n";
+  std::cout << "AVG Time Footpaths (us): " << (static_cast<double>(total_stats.time_footpaths_us_) / results.size()) << "\n";
+  std::cout << "AVG Time Routes (us): " << (static_cast<double>(total_stats.time_routes_us_) / results.size()) << "\n";
+  std::cout << "AVG Time RT Transports (us): " << (static_cast<double>(total_stats.time_rt_transports_us_) / results.size()) << "\n";
 
 
   return 0;

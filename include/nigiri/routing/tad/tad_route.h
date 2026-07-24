@@ -2,6 +2,7 @@
 
 #include "nigiri/routing/search.h"
 #include "nigiri/routing/tad/tad_state.h"
+#include "nigiri/routing/tad/tad_transfer_index.h"
 #include "nigiri/routing/query.h"
 #include "nigiri/timetable.h"
 #include <chrono>
@@ -16,6 +17,7 @@ routing_result tad_route(
     tad_state& t_state,
     query q,
     direction search_dir,
-    std::optional<std::chrono::seconds> timeout = std::nullopt);
+    std::optional<std::chrono::seconds> timeout = std::nullopt,
+    tad_transfer_index const* transfer_index = nullptr);
 
 }  // namespace nigiri::routing

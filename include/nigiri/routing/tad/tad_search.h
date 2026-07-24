@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <memory>
 #include <queue>
 #include <vector>
 
@@ -9,6 +10,8 @@
 
 #include "nigiri/routing/get_earliest_transport.h"
 #include "nigiri/routing/tad/tad_state.h"
+#include "nigiri/routing/tad/tad_transfer_index.h"
+#include "nigiri/routing/tad/tad_transfer_provider.h"
 #include "nigiri/routing/transfer_time_settings.h"
 #include "nigiri/rt/rt_timetable.h"
 #include "nigiri/timetable.h"
@@ -34,6 +37,7 @@ struct tad_stats {
   std::uint64_t scanned_routes_{0};
   std::uint64_t scanned_stop_events_{0};
   std::uint64_t relaxed_walking_edges_{0};
+  std::uint64_t relaxed_transfers_{0};
   std::uint64_t pruned_scans_{0};
   std::uint64_t queue_updates_{0};
   std::uint64_t time_pq_pop_us_{0};
@@ -58,7 +62,8 @@ struct tad_search {
              duration_t max_travel_time = kMaxTravelTime,
              std::uint8_t max_transfers = kMaxTransfers,
              std::vector<uint8_t>* route_active = nullptr,
-             bitfield search_mask = {})
+             bitfield search_mask = {},
+             tad_transfer_index const* transfer_index = nullptr)
       : tt_{tt},
         rtt_{rtt},
         state_{state},
@@ -80,6 +85,12 @@ struct tad_search {
         static_cast<unsigned>(tt_.internal_interval_days().size().count());
     state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size(), n_days,
                   rtt_ ? rtt_->n_rt_transports() : 0U);
+    if (transfer_index != nullptr && transfer_index->is_valid_for(prf_idx_)) {
+      transfer_provider_ = std::make_unique<shortcut_transfer_provider>(
+          transfer_index->profiles_[cista::to_idx(prf_idx_)]);
+    } else {
+      transfer_provider_ = std::make_unique<footpath_transfer_provider>(tt_, prf_idx_);
+    }
   }
 
   tad_stats execute(std::vector<std::pair<location_idx_t, delta_t>> const& starts,
@@ -158,7 +169,7 @@ struct tad_search {
 #if NIGIRI_TAD_PROFILING
       auto const t2 = std::chrono::steady_clock::now();
 #endif
-      relax_footpaths(l, current_time);
+      relax_transfers(l, current_time);
 #if NIGIRI_TAD_PROFILING
       auto const t3 = std::chrono::steady_clock::now();
       stats_.time_footpaths_us_ += std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
@@ -255,14 +266,15 @@ private:
     return false;
   }
 
-  void relax_footpaths(location_idx_t const l, delta_t const current_time) {
-    auto const& fps = fwd() ? tt_.locations_.footpaths_out_[prf_idx_][l]
-                            : tt_.locations_.footpaths_in_[prf_idx_][l];
-    for (auto const& fp : fps) {
+  void relax_transfers(location_idx_t const l, delta_t const current_time) {
+    transfer_edges_buf_.clear();
+    transfer_provider_->stop_transfers(l, fwd(), transfer_edges_buf_);
+    for (auto const& edge : transfer_edges_buf_) {
       ++stats_.relaxed_walking_edges_;
-      auto const target = fp.target();
+      ++stats_.relaxed_transfers_;
+      auto const target = edge.target_;
       auto const transfer_time = duration_t{adjusted_transfer_time(
-          transfer_time_settings_, fp.duration().count())};
+          transfer_time_settings_, edge.duration_.count())};
       update_label(target, add_duration(current_time, transfer_time), l,
                    transport_idx_t::invalid(), day_idx_t::invalid(), true);
     }
@@ -672,6 +684,8 @@ private:
   std::priority_queue<tad_pq_label, std::vector<tad_pq_label>, tad_pq_cmp> pq_;
   bool has_best_target_time_{false};
   delta_t best_target_time_{0};
+  std::unique_ptr<tad_transfer_provider> transfer_provider_;
+  std::vector<tad_transfer_edge> transfer_edges_buf_;
 };
 
 }  // namespace nigiri::routing

@@ -22,7 +22,8 @@ routing_result tad_route(
     tad_state& t_state,
     query q,
     direction search_dir,
-    std::optional<std::chrono::seconds>) {
+    std::optional<std::chrono::seconds>,
+    tad_transfer_index const* transfer_index) {
     s_state.results_.clear();
 
     q.sanitize(tt);
@@ -141,7 +142,7 @@ routing_result tad_route(
                                        q.require_bike_transport_, q.require_car_transport_,
                                        cur_search_base_day, search_dir, is_first_leg,
                                        cur_query_delta, q.max_travel_time_, q.max_transfers_,
-                                       &route_active, search_mask);
+                                       &route_active, search_mask, transfer_index);
             auto const stats = search.execute(current_starts, current_targets);
 
             total_stats.settled_stop_labels_ += stats.settled_stop_labels_;
@@ -562,6 +563,7 @@ routing_result tad_route(
         {"tad_scanned_routes", total_stats.scanned_routes_},
         {"tad_scanned_stop_events", total_stats.scanned_stop_events_},
         {"tad_relaxed_walking_edges", total_stats.relaxed_walking_edges_},
+        {"tad_relaxed_transfers", total_stats.relaxed_transfers_},
         {"tad_pruned_scans", total_stats.pruned_scans_},
         {"tad_queue_updates", total_stats.queue_updates_},
         {"tad_time_pq_pop_us", total_stats.time_pq_pop_us_},
