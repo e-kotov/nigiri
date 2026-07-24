@@ -1059,5 +1059,134 @@ TEST(routing, tad_ultra_shortcut_scalar_parity) {
   }
 }
 
+namespace {
+
+inline loader::mem_dir files_two_routes() {
+  constexpr auto const services_two_routes = R"(
+*Z 01337 80____       048 030                             %
+*A VE 0000001 0000002 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00200                %
+0000002 B                     00230                       %
+*Z 07331 80____       092 015                             %
+*A VE 0000003 0000004 000005                              %
+*G RE  0000003 0000004                                    %
+0000003 C                            00245                %
+0000004 D                     00315                       %
+)";
+  return test_data::hrd_timetable::base().add(
+      {loader::hrd::hrd_5_20_26.fplan_ / "services.101", services_two_routes});
+}
+
+}  // namespace
+
+TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes(), tt);
+
+  auto const loc_a = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const loc_d = tt.locations_.location_id_to_idx_.at({"0000004", src});
+
+  // Add direct footpath A -> B (10 min) and intermediate footpath B -> C (7 min).
+  tt.locations_.footpaths_out_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_in_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_out_[0][loc_a].push_back(footpath{loc_b, 10_minutes});
+  tt.locations_.footpaths_in_[0][loc_b].push_back(footpath{loc_a, 10_minutes});
+  tt.locations_.footpaths_out_[0][loc_b].push_back(footpath{loc_c, 7_minutes});
+  tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_b, 7_minutes});
+
+  finalize(tt);
+
+  // 1. Build index with witness transfer limit = 15 minutes (>= 7 min footpath).
+  auto const ultra_idx_15 = routing::build_tad_ultra_index(tt, 15);
+  ASSERT_TRUE(ultra_idx_15.is_valid_for(profile_idx_t{0}));
+
+  // Verify direct footpath A -> B exists in index.
+  auto const a_idx = cista::to_idx(loc_a);
+  auto const a_start = ultra_idx_15.profiles_[0].out_offsets_[a_idx];
+  auto const a_end = ultra_idx_15.profiles_[0].out_offsets_[a_idx + 1];
+  bool found_a_to_b = false;
+  for (auto i = a_start; i < a_end; ++i) {
+    if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_b) {
+      found_a_to_b = true;
+      EXPECT_EQ(10_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
+    }
+  }
+  EXPECT_TRUE(found_a_to_b);
+
+  // Verify intermediate walking shortcut B -> C is emitted in index.
+  auto const b_idx = cista::to_idx(loc_b);
+  auto const b_start = ultra_idx_15.profiles_[0].out_offsets_[b_idx];
+  auto const b_end = ultra_idx_15.profiles_[0].out_offsets_[b_idx + 1];
+  bool found_b_to_c = false;
+  for (auto i = b_start; i < b_end; ++i) {
+    if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_c) {
+      found_b_to_c = true;
+      // Assert emitted shortcut duration equals walking duration (7 min),
+      // NOT schedule wait (15 min) or total elapsed time (75 min).
+      EXPECT_EQ(7_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
+    }
+  }
+  EXPECT_TRUE(found_b_to_c);
+
+  // Verify reverse in_edge C -> B exists with duration 7_minutes.
+  auto const c_idx = cista::to_idx(loc_c);
+  auto const c_in_start = ultra_idx_15.profiles_[0].in_offsets_[c_idx];
+  auto const c_in_end = ultra_idx_15.profiles_[0].in_offsets_[c_idx + 1];
+  bool found_c_in_b = false;
+  for (auto i = c_in_start; i < c_in_end; ++i) {
+    if (ultra_idx_15.profiles_[0].in_edges_[i].target_ == loc_b) {
+      found_c_in_b = true;
+      EXPECT_EQ(7_minutes, ultra_idx_15.profiles_[0].in_edges_[i].duration_);
+    }
+  }
+  EXPECT_TRUE(found_c_in_b);
+
+  // 2. Build index with witness transfer limit = 5 minutes (< 7 min footpath).
+  auto const ultra_idx_5 = routing::build_tad_ultra_index(tt, 5);
+  ASSERT_TRUE(ultra_idx_5.is_valid_for(profile_idx_t{0}));
+
+  // Verify transfer limit of 5 min prunes the 7 min transfer shortcut B -> C.
+  auto const b_start_5 = ultra_idx_5.profiles_[0].out_offsets_[b_idx];
+  auto const b_end_5 = ultra_idx_5.profiles_[0].out_offsets_[b_idx + 1];
+  bool found_b_to_c_5 = false;
+  for (auto i = b_start_5; i < b_end_5; ++i) {
+    if (ultra_idx_5.profiles_[0].out_edges_[i].target_ == loc_c) {
+      found_b_to_c_5 = true;
+    }
+  }
+  EXPECT_FALSE(found_b_to_c_5);
+
+  // 3. Scalar search parity for query A -> D requiring the intermediate transfer.
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+  routing::query q;
+  q.start_time_ = start_time;
+  q.start_.push_back(routing::offset{loc_a, 0_minutes, 0});
+  q.destination_.push_back(routing::offset{loc_d, 0_minutes, 0});
+
+  routing::search_state s_state_default;
+  routing::tad_state t_state_default;
+  auto const res_default = routing::tad_route(
+      tt, nullptr, s_state_default, t_state_default, q, direction::kForward);
+
+  routing::search_state s_state_shortcut;
+  routing::tad_state t_state_shortcut;
+  auto const res_shortcut = routing::tad_route(
+      tt, nullptr, s_state_shortcut, t_state_shortcut, q, direction::kForward,
+      std::nullopt, &ultra_idx_15);
+
+  ASSERT_EQ(1U, res_default.journeys_->size());
+  ASSERT_EQ(res_default.journeys_->size(), res_shortcut.journeys_->size());
+  EXPECT_EQ(res_default.journeys_->begin()->dest_time_,
+            res_shortcut.journeys_->begin()->dest_time_);
+  EXPECT_EQ(res_default.journeys_->begin()->legs_,
+            res_shortcut.journeys_->begin()->legs_);
+}
+
+
 
 

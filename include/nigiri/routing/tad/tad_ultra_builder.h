@@ -16,6 +16,22 @@
 
 namespace nigiri::routing {
 
+inline duration_t safe_duration_cast(std::int64_t const minutes) {
+  constexpr auto kMax = static_cast<std::int64_t>(std::numeric_limits<std::int16_t>::max());
+  constexpr auto kMin = static_cast<std::int64_t>(std::numeric_limits<std::int16_t>::min());
+  if (minutes > kMax) {
+    return duration_t{static_cast<std::int16_t>(kMax)};
+  }
+  if (minutes < kMin) {
+    return duration_t{static_cast<std::int16_t>(kMin)};
+  }
+  return duration_t{static_cast<std::int16_t>(minutes)};
+}
+
+inline duration_t safe_duration_convert(duration_t const d) {
+  return safe_duration_cast(d.count());
+}
+
 struct tad_ultra_builder {
   timetable const& tt_;
   int witness_transfer_limit_minutes_{15};
@@ -40,6 +56,7 @@ struct tad_ultra_builder {
 
       if (prf < tt_.locations_.footpaths_out_.size()) {
         auto const& footpaths_out = tt_.locations_.footpaths_out_[prf];
+        auto const limit_dur = duration_t{witness_transfer_limit_minutes_};
         for (std::size_t i = 0; i < n_locs; ++i) {
           auto const src = location_idx_t{static_cast<std::uint32_t>(i)};
           if (i < footpaths_out.size()) {
@@ -47,9 +64,11 @@ struct tad_ultra_builder {
               auto const target = fp.target();
               if (cista::to_idx(target) < n_locs && target != src) {
                 auto const dur = fp.duration();
-                auto it = out_shortcuts[i].find(target);
-                if (it == out_shortcuts[i].end() || dur < it->second) {
-                  out_shortcuts[i][target] = dur;
+                if (dur <= limit_dur) {
+                  auto it = out_shortcuts[i].find(target);
+                  if (it == out_shortcuts[i].end() || dur < it->second) {
+                    out_shortcuts[i][target] = dur;
+                  }
                 }
               }
             }
@@ -63,7 +82,7 @@ struct tad_ultra_builder {
       for (std::size_t i = 0; i < n_locs; ++i) {
         for (auto const& [target, dur] : out_shortcuts[i]) {
           prf_shortcuts.out_edges_.push_back(
-              tad_transfer_edge{target, duration_t{static_cast<std::int16_t>(dur.count())}});
+              tad_transfer_edge{target, safe_duration_convert(dur)});
         }
         prf_shortcuts.out_offsets_[i + 1U] =
             static_cast<std::uint32_t>(prf_shortcuts.out_edges_.size());
@@ -85,7 +104,7 @@ struct tad_ultra_builder {
       for (std::size_t i = 0; i < n_locs; ++i) {
         for (auto const& [src, dur] : in_shortcuts[i]) {
           prf_shortcuts.in_edges_.push_back(
-              tad_transfer_edge{src, duration_t{static_cast<std::int16_t>(dur.count())}});
+              tad_transfer_edge{src, safe_duration_convert(dur)});
         }
         prf_shortcuts.in_offsets_[i + 1U] =
             static_cast<std::uint32_t>(prf_shortcuts.in_edges_.size());
@@ -132,9 +151,9 @@ private:
       return (idx < n_locs && labels[idx].ts_2_ == timestamp) ? labels[idx].arr_2_ : kMaxTime;
     };
 
-    auto const& footpaths_out = prf < tt_.locations_.footpaths_out_.size()
-                                   ? tt_.locations_.footpaths_out_[prf]
-                                   : vecvec<location_idx_t, footpath>{};
+    auto const* footpaths_out = prf < tt_.locations_.footpaths_out_.size()
+                                    ? &tt_.locations_.footpaths_out_[prf]
+                                    : nullptr;
 
     auto const n_days = static_cast<std::size_t>(tt_.internal_interval_days().size().count());
 
@@ -164,8 +183,8 @@ private:
           auto const u_idx = cista::to_idx(u);
           if (d > direct_dist[u_idx]) continue;
 
-          if (u_idx < footpaths_out.size()) {
-            for (auto const& fp : footpaths_out[u]) {
+          if (footpaths_out != nullptr && u_idx < footpaths_out->size()) {
+            for (auto const& fp : (*footpaths_out)[u]) {
               auto const v = fp.target();
               auto const v_idx = cista::to_idx(v);
               if (v_idx < n_locs) {
@@ -299,20 +318,22 @@ private:
             if (arr > get_arr_1(u)) continue;
             t1_updated_stops.push_back(u);
 
-            if (arr > dep_time + limit_dur) break;
-
             auto const u_idx = cista::to_idx(u);
-            if (u_idx < footpaths_out.size()) {
+            if (footpaths_out != nullptr && u_idx < footpaths_out->size()) {
               auto const parent = labels[u_idx].transfer_parent_1_;
-              for (auto const& fp : footpaths_out[u]) {
+              auto const parent_arr = get_arr_1(parent);
+              for (auto const& fp : (*footpaths_out)[u]) {
                 auto const v = fp.target();
                 auto const new_arr = arr + fp.duration();
-                if (new_arr < get_arr_1(v)) {
-                  auto const v_idx = cista::to_idx(v);
-                  labels[v_idx].ts_1_ = timestamp;
-                  labels[v_idx].arr_1_ = new_arr;
-                  labels[v_idx].transfer_parent_1_ = parent;
-                  pq.push({v, new_arr});
+                if (parent_arr != kMaxTime && new_arr >= parent_arr &&
+                    (new_arr - parent_arr) <= limit_dur) {
+                  if (new_arr < get_arr_1(v)) {
+                    auto const v_idx = cista::to_idx(v);
+                    labels[v_idx].ts_1_ = timestamp;
+                    labels[v_idx].arr_1_ = new_arr;
+                    labels[v_idx].transfer_parent_1_ = parent;
+                    pq.push({v, new_arr});
+                  }
                 }
               }
             }
@@ -405,8 +426,9 @@ private:
                 auto const arr_u = get_arr_1(transfer_parent);
                 auto const arr_y = get_arr_1(route_parent);
                 if (arr_u != kMaxTime && arr_y != kMaxTime && arr_y >= arr_u) {
-                  auto const dur = duration_t{static_cast<std::int16_t>(
-                      std::chrono::duration_cast<std::chrono::minutes>(arr_y - arr_u).count())};
+                  auto const dur_minutes =
+                      std::chrono::duration_cast<std::chrono::minutes>(arr_y - arr_u).count();
+                  auto const dur = safe_duration_cast(dur_minutes);
                   auto const tp_idx = cista::to_idx(transfer_parent);
                   auto it = out_shortcuts[tp_idx].find(route_parent);
                   if (it == out_shortcuts[tp_idx].end() || dur < it->second) {
@@ -417,8 +439,8 @@ private:
               labels[w_idx].route_parent_2_ = location_idx_t::invalid();
             }
 
-            if (w_idx < footpaths_out.size()) {
-              for (auto const& fp : footpaths_out[w]) {
+            if (footpaths_out != nullptr && w_idx < footpaths_out->size()) {
+              for (auto const& fp : (*footpaths_out)[w]) {
                 auto const v = fp.target();
                 auto const new_arr = arr + fp.duration();
                 if (new_arr < get_arr_2(v)) {
