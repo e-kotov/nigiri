@@ -10,6 +10,7 @@
 #include "nigiri/routing/tad/tad_search.h"
 #include "nigiri/routing/tad/tad_state.h"
 #include "nigiri/routing/tad/tad_station_grouping.h"
+#include "nigiri/routing/tad/tad_ultra_builder.h"
 #include "nigiri/routing/search.h"
 #include "nigiri/common/parse_time.h"
 #include "nigiri/routing/raptor/raptor.h"
@@ -1005,5 +1006,58 @@ TEST(routing, tad_station_grouping_explicit_relationships) {
     EXPECT_LE(cista::to_idx(grouping.representative(member)), cista::to_idx(member));
   }
 }
+
+TEST(routing, tad_ultra_builder_valid_index) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
+  finalize(tt);
+
+  auto const idx = routing::build_tad_ultra_index(tt, 15);
+  EXPECT_TRUE(idx.is_valid_for(profile_idx_t{0}));
+  EXPECT_EQ(tt.n_locations(), idx.n_locations_);
+  EXPECT_EQ("ultra_witness_shortcuts_v1", idx.profiles_[0].transfer_time_fingerprint_);
+}
+
+TEST(routing, tad_ultra_shortcut_scalar_parity) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
+  finalize(tt);
+
+  auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
+  EXPECT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
+
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+
+  routing::query q;
+  q.start_time_ = start_time;
+  q.start_.push_back(routing::offset{start_loc, 0_minutes, 0});
+  q.destination_.push_back(routing::offset{dest_loc, 0_minutes, 0});
+
+  routing::search_state s_state_default;
+  routing::tad_state t_state_default;
+  auto const res_default = routing::tad_route(
+      tt, nullptr, s_state_default, t_state_default, q, direction::kForward);
+
+  routing::search_state s_state_shortcut;
+  routing::tad_state t_state_shortcut;
+  auto const res_shortcut = routing::tad_route(
+      tt, nullptr, s_state_shortcut, t_state_shortcut, q, direction::kForward,
+      std::nullopt, &ultra_idx);
+
+  ASSERT_EQ(res_default.journeys_->size(), res_shortcut.journeys_->size());
+  if (!res_default.journeys_->empty()) {
+    EXPECT_EQ(res_default.journeys_->begin()->dest_time_,
+              res_shortcut.journeys_->begin()->dest_time_);
+    EXPECT_EQ(res_default.journeys_->begin()->legs_,
+              res_shortcut.journeys_->begin()->legs_);
+  }
+}
+
 
 
