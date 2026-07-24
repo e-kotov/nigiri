@@ -5,10 +5,11 @@
 
 #include "../loader/hrd/hrd_timetable.h"
 
-#include "nigiri/routing/tad/tad_search.h"
-#include "nigiri/routing/tad/tad_state.h"
 #include "nigiri/routing/tad/tad_reconstruct.h"
 #include "nigiri/routing/tad/tad_route.h"
+#include "nigiri/routing/tad/tad_search.h"
+#include "nigiri/routing/tad/tad_state.h"
+#include "nigiri/routing/tad/tad_station_grouping.h"
 #include "nigiri/routing/search.h"
 #include "nigiri/common/parse_time.h"
 #include "nigiri/routing/raptor/raptor.h"
@@ -942,3 +943,67 @@ TEST(routing, tad_shortcut_scalar_parity) {
               res_shortcut.journeys_->begin()->legs_);
   }
 }
+
+TEST(routing, tad_station_grouping) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
+  finalize(tt);
+
+  auto const grouping = routing::build_station_grouping(tt, profile_idx_t{0});
+  EXPECT_EQ(tt.n_locations(), grouping.representative_of_stop_.size());
+
+  std::size_t total_members = 0;
+  for (auto const& st : grouping.stations_) {
+    EXPECT_NE(location_idx_t::invalid(), st.representative_);
+    EXPECT_FALSE(st.member_stops_.empty());
+    EXPECT_TRUE(grouping.is_representative(st.representative_));
+    total_members += st.member_stops_.size();
+    for (auto const member : st.member_stops_) {
+      EXPECT_EQ(st.representative_, grouping.representative(member));
+      EXPECT_EQ(st.representative_, grouping.representative(grouping.representative(member)));
+      EXPECT_LE(cista::to_idx(st.representative_), cista::to_idx(member));
+    }
+  }
+  EXPECT_EQ(tt.n_locations(), total_members);
+}
+
+TEST(routing, tad_station_grouping_explicit_relationships) {
+  timetable tt;
+  constexpr std::size_t n_locs = 5;
+  tt.locations_.names_.resize(n_locs);
+  tt.locations_.parents_.resize(n_locs, location_idx_t::invalid());
+  tt.locations_.types_.resize(n_locs, location_type::kStation);
+  tt.locations_.footpaths_out_[0].resize(n_locs);
+
+  auto const loc0 = location_idx_t{0};
+  auto const loc1 = location_idx_t{1};
+  auto const loc2 = location_idx_t{2};
+  auto const loc3 = location_idx_t{3};
+  auto const loc4 = location_idx_t{4};
+
+  tt.locations_.parents_[loc1] = loc0;
+
+  for (std::size_t i = 0; i < n_locs; ++i) {
+    tt.locations_.equivalences_.emplace_back();
+  }
+  tt.locations_.equivalences_[loc0].emplace_back(loc2);
+
+  tt.locations_.footpaths_out_[0][loc0].push_back(footpath{loc3, 0_minutes});
+  tt.locations_.footpaths_out_[0][loc0].push_back(footpath{loc4, 5_minutes});
+
+  auto const grouping = routing::build_station_grouping(tt, profile_idx_t{0});
+
+  EXPECT_EQ(loc0, grouping.representative(loc0));
+  EXPECT_EQ(loc0, grouping.representative(loc1));
+  EXPECT_EQ(loc0, grouping.representative(loc2));
+  EXPECT_EQ(loc0, grouping.representative(loc3));
+  EXPECT_EQ(loc4, grouping.representative(loc4));
+
+  for (auto const member : {loc0, loc1, loc2, loc3}) {
+    EXPECT_LE(cista::to_idx(grouping.representative(member)), cista::to_idx(member));
+  }
+}
+
+
