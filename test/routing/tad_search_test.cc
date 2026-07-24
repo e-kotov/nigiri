@@ -869,6 +869,8 @@ TEST(routing, tad_via_leg_destination_node_propagation) {
   EXPECT_FALSE(res.journeys_->empty());
 }
 
+#include "nigiri/routing/tad/tad_transfer_index_builder.h"
+
 TEST(routing, tad_shortcut_transfer_provider) {
   routing::tad_transfer_index idx;
   idx.version_ = routing::tad_transfer_index::kVersion;
@@ -898,6 +900,45 @@ TEST(routing, tad_shortcut_transfer_provider) {
   provider.stop_transfers(location_idx_t{1}, false, edges);
   EXPECT_TRUE(edges.empty());
 
-  prf.out_offsets_[10] = 2;
+  prf.out_offsets_[3] = 0;
   EXPECT_FALSE(idx.is_valid_for(profile_idx_t{0}));
+}
+
+TEST(routing, tad_shortcut_scalar_parity) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
+  finalize(tt);
+
+  auto const transfer_idx = routing::build_tad_transfer_index(tt);
+  EXPECT_TRUE(transfer_idx.is_valid_for(profile_idx_t{0}));
+
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+
+  routing::query q;
+  q.start_time_ = start_time;
+  q.start_.push_back(routing::offset{start_loc, 0_minutes, 0});
+  q.destination_.push_back(routing::offset{dest_loc, 0_minutes, 0});
+
+  routing::search_state s_state_default;
+  routing::tad_state t_state_default;
+  auto const res_default = routing::tad_route(
+      tt, nullptr, s_state_default, t_state_default, q, direction::kForward);
+
+  routing::search_state s_state_shortcut;
+  routing::tad_state t_state_shortcut;
+  auto const res_shortcut = routing::tad_route(
+      tt, nullptr, s_state_shortcut, t_state_shortcut, q, direction::kForward,
+      std::nullopt, &transfer_idx);
+
+  ASSERT_EQ(res_default.journeys_->size(), res_shortcut.journeys_->size());
+  if (!res_default.journeys_->empty()) {
+    EXPECT_EQ(res_default.journeys_->begin()->dest_time_,
+              res_shortcut.journeys_->begin()->dest_time_);
+    EXPECT_EQ(res_default.journeys_->begin()->legs_,
+              res_shortcut.journeys_->begin()->legs_);
+  }
 }
