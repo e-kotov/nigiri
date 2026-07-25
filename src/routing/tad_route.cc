@@ -460,7 +460,24 @@ routing_result tad_route(
                 }
             }
             
-            if (has_start_match) {
+            bool use_expanded_start = false;
+            auto const start_fp_it = fwd ? expanded_start_footpaths.find(start_loc) : expanded_start_footpaths.end();
+            if (start_fp_it != expanded_start_footpaths.end()) {
+                if (!has_start_match || start_fp_it->second.combined_dur_ <= start_match.duration()) {
+                    use_expanded_start = true;
+                }
+            }
+
+            if (use_expanded_start) {
+                auto const& info = start_fp_it->second;
+                auto const core_dep = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
+                auto const walk_dur = std::chrono::minutes{info.fp_dur_.count()};
+                auto const walk_dep = core_dep - walk_dur;
+                j.legs_.insert(j.legs_.begin(), journey::leg{
+                    direction::kForward, info.root_loc_, start_loc,
+                    walk_dep, core_dep, footpath{start_loc, info.fp_dur_}
+                });
+            } else if (has_start_match) {
                 bool is_q_start = utl::any_of(q.start_, [&](offset const& o) { return matches(tt, q.start_match_mode_, o.target(), start_loc); });
                 if (q.start_match_mode_ == location_match_mode::kIntermodal || (!is_q_start && start_match.duration().count() > 0)) {
                     auto const dep_time = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
@@ -469,18 +486,6 @@ routing_result tad_route(
                     j.legs_.insert(j.legs_.begin(), journey::leg{
                         direction::kForward, get_special_station(special_station::kStart), start_loc,
                         start_dep, core_dep, start_match
-                    });
-                }
-            } else if (fwd) {
-                auto const start_fp_it = expanded_start_footpaths.find(start_loc);
-                if (start_fp_it != expanded_start_footpaths.end()) {
-                    auto const& info = start_fp_it->second;
-                    auto const core_dep = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
-                    auto const walk_dur = std::chrono::minutes{info.fp_dur_.count()};
-                    auto const walk_dep = core_dep - walk_dur;
-                    j.legs_.insert(j.legs_.begin(), journey::leg{
-                        direction::kForward, info.root_loc_, start_loc,
-                        walk_dep, core_dep, footpath{start_loc, info.fp_dur_}
                     });
                 }
             }

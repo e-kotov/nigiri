@@ -1331,6 +1331,58 @@ TEST(routing, tad_access_shortcut_integration) {
   EXPECT_EQ(3_minutes, j_default.legs_[0].arr_time_ - j_default.legs_[0].dep_time_);
 }
 
+TEST(routing, tad_access_shortcut_conflict_resolution) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+
+  auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const loc_x = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000004", src});
+  auto const loc_d = tt.locations_.location_id_to_idx_.at({"0000005", src});
+
+  tt.locations_.footpaths_out_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_in_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_out_[0][loc_b].push_back(footpath{loc_x, 3_minutes});
+  tt.locations_.footpaths_in_[0][loc_x].push_back(footpath{loc_b, 3_minutes});
+  tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
+  tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
+
+  finalize(tt);
+
+  auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
+  ASSERT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
+
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+  routing::query q;
+  q.start_time_ = start_time;
+  // Conflict setup: q.start_ contains BOTH direct C (20 min delay) AND root start B (0 min delay).
+  // B -> C expanded access shortcut (7 min walk) yields combined duration 7 min, beating direct C (20 min).
+  q.start_.push_back(routing::offset{loc_b, 0_minutes, 0});
+  q.start_.push_back(routing::offset{loc_c, 20_minutes, 0});
+  q.destination_.push_back(routing::offset{loc_d, 0_minutes, 0});
+  q.use_start_footpaths_ = true;
+
+  routing::search_state s_state;
+  routing::tad_state t_state;
+  auto const res = routing::tad_route(
+      tt, nullptr, s_state, t_state, q, direction::kForward,
+      std::nullopt, &ultra_idx);
+
+  ASSERT_EQ(1U, res.journeys_->size());
+  auto const& j = *res.journeys_->begin();
+  // Expanded B->C access shortcut must win over direct C (20m offset).
+  ASSERT_EQ(2U, j.legs_.size());
+  EXPECT_EQ(loc_b, j.legs_[0].from_);
+  EXPECT_EQ(loc_c, j.legs_[0].to_);
+  EXPECT_EQ(7_minutes, j.legs_[0].arr_time_ - j.legs_[0].dep_time_);
+  ASSERT_TRUE(std::holds_alternative<footpath>(j.legs_[0].uses_));
+  auto const access_fp = std::get<footpath>(j.legs_[0].uses_);
+  EXPECT_EQ(loc_c, access_fp.target());
+  EXPECT_EQ(7_minutes, access_fp.duration());
+}
+
 TEST(routing, tad_egress_shortcut_integration) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
