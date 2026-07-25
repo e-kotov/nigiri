@@ -319,8 +319,6 @@ private:
             pq.push({u, get_arr_1(u)});
           }
 
-          auto const limit_dur = duration_t{witness_transfer_limit_minutes_};
-
           while (!pq.empty()) {
             auto const [u, arr] = pq.top();
             pq.pop();

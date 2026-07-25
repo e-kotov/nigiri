@@ -1103,9 +1103,9 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
   tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
 
-  // Add a long base footpath A -> D (25 min) to prove long base footpaths are preserved without dropping.
-  tt.locations_.footpaths_out_[0][loc_a].push_back(footpath{loc_d, 25_minutes});
-  tt.locations_.footpaths_in_[0][loc_d].push_back(footpath{loc_a, 25_minutes});
+  // Add a long base footpath A -> D (120 min) to prove long base footpaths are preserved without dominating transit.
+  tt.locations_.footpaths_out_[0][loc_a].push_back(footpath{loc_d, 120_minutes});
+  tt.locations_.footpaths_in_[0][loc_d].push_back(footpath{loc_a, 120_minutes});
 
   finalize(tt);
 
@@ -1151,7 +1151,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   }
   EXPECT_TRUE(found_c_in_b);
 
-  // Verify long base footpath A -> D (25 min) is preserved without dropping.
+  // Verify long base footpath A -> D (120 min) is preserved without dropping.
   auto const a_idx = cista::to_idx(loc_a);
   auto const a_start = ultra_idx_15.profiles_[0].out_offsets_[a_idx];
   auto const a_end = ultra_idx_15.profiles_[0].out_offsets_[a_idx + 1];
@@ -1159,7 +1159,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   for (auto i = a_start; i < a_end; ++i) {
     if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_d) {
       found_long_a_to_d = true;
-      EXPECT_EQ(25_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
+      EXPECT_EQ(120_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
     }
   }
   EXPECT_TRUE(found_long_a_to_d);
@@ -1206,10 +1206,62 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
 
   ASSERT_EQ(1U, res_default.journeys_->size());
   ASSERT_EQ(res_default.journeys_->size(), res_shortcut.journeys_->size());
+  EXPECT_EQ(unixtime_t{sys_days{2020_y / March / 30}} + 3_hours + 15_minutes,
+            res_shortcut.journeys_->begin()->dest_time_);
   EXPECT_EQ(res_default.journeys_->begin()->dest_time_,
             res_shortcut.journeys_->begin()->dest_time_);
-  EXPECT_EQ(res_default.journeys_->begin()->legs_,
-            res_shortcut.journeys_->begin()->legs_);
+  // Default search uses 2 footpaths (B->X and X->C), yielding 4 legs total.
+  EXPECT_EQ(4U, res_default.journeys_->begin()->legs_.size());
+  // Shortcut search uses the single emitted ULTRA shortcut (B->C), yielding 3 legs total.
+  EXPECT_EQ(3U, res_shortcut.journeys_->begin()->legs_.size());
+}
+
+TEST(routing, tad_ultra_builder_limit_validation) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+
+  auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const loc_x = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000004", src});
+
+  tt.locations_.footpaths_out_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_in_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_out_[0][loc_b].push_back(footpath{loc_x, 3_minutes});
+  tt.locations_.footpaths_in_[0][loc_x].push_back(footpath{loc_b, 3_minutes});
+  tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
+  tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
+
+  finalize(tt);
+
+  // 1. Negative limit (-10) is clamped to 0 minutes via safe_limit_duration, emitting no multi-hop shortcuts.
+  auto const ultra_idx_neg = routing::build_tad_ultra_index(tt, -10);
+  ASSERT_TRUE(ultra_idx_neg.is_valid_for(profile_idx_t{0}));
+  auto const b_idx = cista::to_idx(loc_b);
+  auto const b_start_neg = ultra_idx_neg.profiles_[0].out_offsets_[b_idx];
+  auto const b_end_neg = ultra_idx_neg.profiles_[0].out_offsets_[b_idx + 1];
+  bool found_b_to_c_neg = false;
+  for (auto i = b_start_neg; i < b_end_neg; ++i) {
+    if (ultra_idx_neg.profiles_[0].out_edges_[i].target_ == loc_c) {
+      found_b_to_c_neg = true;
+    }
+  }
+  EXPECT_FALSE(found_b_to_c_neg);
+
+  // 2. Oversized limit (100000) is clamped to 32767 minutes without wrapping into negative duration.
+  auto const ultra_idx_large = routing::build_tad_ultra_index(tt, 100000);
+  ASSERT_TRUE(ultra_idx_large.is_valid_for(profile_idx_t{0}));
+  auto const b_start_large = ultra_idx_large.profiles_[0].out_offsets_[b_idx];
+  auto const b_end_large = ultra_idx_large.profiles_[0].out_offsets_[b_idx + 1];
+  bool found_b_to_c_large = false;
+  for (auto i = b_start_large; i < b_end_large; ++i) {
+    if (ultra_idx_large.profiles_[0].out_edges_[i].target_ == loc_c) {
+      found_b_to_c_large = true;
+      EXPECT_EQ(7_minutes, ultra_idx_large.profiles_[0].out_edges_[i].duration_);
+    }
+  }
+  EXPECT_TRUE(found_b_to_c_large);
 }
 
 
