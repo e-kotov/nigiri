@@ -1311,6 +1311,10 @@ TEST(routing, tad_access_shortcut_integration) {
   EXPECT_EQ(loc_b, j_shortcut.legs_[0].from_);
   EXPECT_EQ(loc_c, j_shortcut.legs_[0].to_);
   EXPECT_EQ(7_minutes, j_shortcut.legs_[0].arr_time_ - j_shortcut.legs_[0].dep_time_);
+  ASSERT_TRUE(std::holds_alternative<footpath>(j_shortcut.legs_[0].uses_));
+  auto const access_fp = std::get<footpath>(j_shortcut.legs_[0].uses_);
+  EXPECT_EQ(loc_c, access_fp.target());
+  EXPECT_EQ(7_minutes, access_fp.duration());
 
   // 2. Default search without shortcut index (uses base footpaths only: B->X (3m) and X->C (4m), yielding 3 legs)
   routing::search_state s_state_default;
@@ -1373,6 +1377,10 @@ TEST(routing, tad_egress_shortcut_integration) {
   EXPECT_EQ(loc_b, j_shortcut.legs_[1].from_);
   EXPECT_EQ(loc_c, j_shortcut.legs_[1].to_);
   EXPECT_EQ(7_minutes, j_shortcut.legs_[1].arr_time_ - j_shortcut.legs_[1].dep_time_);
+  ASSERT_TRUE(std::holds_alternative<footpath>(j_shortcut.legs_[1].uses_));
+  auto const egress_fp = std::get<footpath>(j_shortcut.legs_[1].uses_);
+  EXPECT_EQ(loc_c, egress_fp.target());
+  EXPECT_EQ(7_minutes, egress_fp.duration());
 
   // 2. Default search without shortcut index (uses base footpaths B->X (3m) and X->C (4m), yielding 3 legs)
   routing::search_state s_state_default;
