@@ -32,6 +32,18 @@ inline duration_t safe_duration_convert(duration_t const d) {
   return safe_duration_cast(d.count());
 }
 
+inline duration_t safe_duration_add(duration_t const a, duration_t const b) {
+  auto const sum = static_cast<std::int64_t>(a.count()) + static_cast<std::int64_t>(b.count());
+  return safe_duration_cast(sum);
+}
+
+inline duration_t safe_limit_duration(int const limit_minutes) {
+  if (limit_minutes < 0) {
+    return duration_t{0};
+  }
+  return safe_duration_cast(static_cast<std::int64_t>(limit_minutes));
+}
+
 struct tad_ultra_builder {
   timetable const& tt_;
   int witness_transfer_limit_minutes_{15};
@@ -56,7 +68,6 @@ struct tad_ultra_builder {
 
       if (prf < tt_.locations_.footpaths_out_.size()) {
         auto const& footpaths_out = tt_.locations_.footpaths_out_[prf];
-        auto const limit_dur = duration_t{witness_transfer_limit_minutes_};
         for (std::size_t i = 0; i < n_locs; ++i) {
           auto const src = location_idx_t{static_cast<std::uint32_t>(i)};
           if (i < footpaths_out.size()) {
@@ -64,11 +75,9 @@ struct tad_ultra_builder {
               auto const target = fp.target();
               if (cista::to_idx(target) < n_locs && target != src) {
                 auto const dur = fp.duration();
-                if (dur <= limit_dur) {
-                  auto it = out_shortcuts[i].find(target);
-                  if (it == out_shortcuts[i].end() || dur < it->second) {
-                    out_shortcuts[i][target] = dur;
-                  }
+                auto it = out_shortcuts[i].find(target);
+                if (it == out_shortcuts[i].end() || dur < it->second) {
+                  out_shortcuts[i][target] = dur;
                 }
               }
             }
@@ -137,6 +146,7 @@ private:
     std::uint32_t timestamp = 0;
 
     auto const kMaxTime = unixtime_t::max();
+    auto const limit_dur = safe_limit_duration(witness_transfer_limit_minutes_);
 
     auto const get_arr_0 = [&](location_idx_t l) {
       auto const idx = cista::to_idx(l);
@@ -188,7 +198,7 @@ private:
               auto const v = fp.target();
               auto const v_idx = cista::to_idx(v);
               if (v_idx < n_locs) {
-                auto const new_d = d + fp.duration();
+                auto const new_d = safe_duration_add(d, fp.duration());
                 if (new_d < direct_dist[v_idx]) {
                   if (direct_dist[v_idx] == duration_t::max()) {
                     direct_stops.push_back(v);

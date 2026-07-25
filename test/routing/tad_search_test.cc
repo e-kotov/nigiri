@@ -1061,21 +1061,21 @@ TEST(routing, tad_ultra_shortcut_scalar_parity) {
 
 namespace {
 
-inline loader::mem_dir files_two_routes() {
-  constexpr auto const services_two_routes = R"(
+inline loader::mem_dir files_two_routes_multihop() {
+  constexpr auto const services_multihop = R"(
 *Z 01337 80____       048 030                             %
 *A VE 0000001 0000002 000005                              %
 *G RE  0000001 0000002                                    %
 0000001 A                            00200                %
 0000002 B                     00230                       %
 *Z 07331 80____       092 015                             %
-*A VE 0000003 0000004 000005                              %
-*G RE  0000003 0000004                                    %
-0000003 C                            00245                %
-0000004 D                     00315                       %
+*A VE 0000004 0000005 000005                              %
+*G RE  0000004 0000005                                    %
+0000004 C                            00245                %
+0000005 D                     00315                       %
 )";
   return test_data::hrd_timetable::base().add(
-      {loader::hrd::hrd_5_20_26.fplan_ / "services.101", services_two_routes});
+      {loader::hrd::hrd_5_20_26.fplan_ / "services.101", services_multihop});
 }
 
 }  // namespace
@@ -1084,54 +1084,59 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes(), tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
 
   auto const loc_a = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
-  auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000003", src});
-  auto const loc_d = tt.locations_.location_id_to_idx_.at({"0000004", src});
+  auto const loc_x = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000004", src});
+  auto const loc_d = tt.locations_.location_id_to_idx_.at({"0000005", src});
 
-  // Add direct footpath A -> B (10 min) and intermediate footpath B -> C (7 min).
   tt.locations_.footpaths_out_[0].resize(tt.n_locations());
   tt.locations_.footpaths_in_[0].resize(tt.n_locations());
-  tt.locations_.footpaths_out_[0][loc_a].push_back(footpath{loc_b, 10_minutes});
-  tt.locations_.footpaths_in_[0][loc_b].push_back(footpath{loc_a, 10_minutes});
-  tt.locations_.footpaths_out_[0][loc_b].push_back(footpath{loc_c, 7_minutes});
-  tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_b, 7_minutes});
+
+  // Add multi-hop base footpaths: B -> X (3 min) and X -> C (4 min).
+  // CRITICAL: There is NO direct base footpath B -> C in tt!
+  tt.locations_.footpaths_out_[0][loc_b].push_back(footpath{loc_x, 3_minutes});
+  tt.locations_.footpaths_in_[0][loc_x].push_back(footpath{loc_b, 3_minutes});
+
+  tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
+  tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
+
+  // Add a long base footpath A -> D (25 min) to prove long base footpaths are preserved without dropping.
+  tt.locations_.footpaths_out_[0][loc_a].push_back(footpath{loc_d, 25_minutes});
+  tt.locations_.footpaths_in_[0][loc_d].push_back(footpath{loc_a, 25_minutes});
 
   finalize(tt);
 
-  // 1. Build index with witness transfer limit = 15 minutes (>= 7 min footpath).
+  // 1. Build index with witness transfer limit = 15 minutes (>= 7 min multi-hop walk).
   auto const ultra_idx_15 = routing::build_tad_ultra_index(tt, 15);
   ASSERT_TRUE(ultra_idx_15.is_valid_for(profile_idx_t{0}));
 
-  // Verify direct footpath A -> B exists in index.
-  auto const a_idx = cista::to_idx(loc_a);
-  auto const a_start = ultra_idx_15.profiles_[0].out_offsets_[a_idx];
-  auto const a_end = ultra_idx_15.profiles_[0].out_offsets_[a_idx + 1];
-  bool found_a_to_b = false;
-  for (auto i = a_start; i < a_end; ++i) {
-    if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_b) {
-      found_a_to_b = true;
-      EXPECT_EQ(10_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
-    }
-  }
-  EXPECT_TRUE(found_a_to_b);
-
-  // Verify intermediate walking shortcut B -> C is emitted in index.
   auto const b_idx = cista::to_idx(loc_b);
   auto const b_start = ultra_idx_15.profiles_[0].out_offsets_[b_idx];
   auto const b_end = ultra_idx_15.profiles_[0].out_offsets_[b_idx + 1];
-  bool found_b_to_c = false;
+
+  // Prove that B -> X (3 min) base footpath exists.
+  bool found_b_to_x = false;
+  for (auto i = b_start; i < b_end; ++i) {
+    if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_x) {
+      found_b_to_x = true;
+      EXPECT_EQ(3_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
+    }
+  }
+  EXPECT_TRUE(found_b_to_x);
+
+  // Prove that run_witness_search() emitted the NEW SHORTCUT edge B -> C (7 min),
+  // which was NOT a direct base footpath in tt!
+  bool found_emitted_b_to_c = false;
   for (auto i = b_start; i < b_end; ++i) {
     if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_c) {
-      found_b_to_c = true;
-      // Assert emitted shortcut duration equals walking duration (7 min),
-      // NOT schedule wait (15 min) or total elapsed time (75 min).
+      found_emitted_b_to_c = true;
       EXPECT_EQ(7_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
     }
   }
-  EXPECT_TRUE(found_b_to_c);
+  EXPECT_TRUE(found_emitted_b_to_c);
 
   // Verify reverse in_edge C -> B exists with duration 7_minutes.
   auto const c_idx = cista::to_idx(loc_c);
@@ -1146,20 +1151,40 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   }
   EXPECT_TRUE(found_c_in_b);
 
-  // 2. Build index with witness transfer limit = 5 minutes (< 7 min footpath).
+  // Verify long base footpath A -> D (25 min) is preserved without dropping.
+  auto const a_idx = cista::to_idx(loc_a);
+  auto const a_start = ultra_idx_15.profiles_[0].out_offsets_[a_idx];
+  auto const a_end = ultra_idx_15.profiles_[0].out_offsets_[a_idx + 1];
+  bool found_long_a_to_d = false;
+  for (auto i = a_start; i < a_end; ++i) {
+    if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_d) {
+      found_long_a_to_d = true;
+      EXPECT_EQ(25_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
+    }
+  }
+  EXPECT_TRUE(found_long_a_to_d);
+
+  // 2. Build index with witness transfer limit = 5 minutes (< 7 min multi-hop walk).
   auto const ultra_idx_5 = routing::build_tad_ultra_index(tt, 5);
   ASSERT_TRUE(ultra_idx_5.is_valid_for(profile_idx_t{0}));
 
-  // Verify transfer limit of 5 min prunes the 7 min transfer shortcut B -> C.
+  // Verify base footpath B -> X (3 min) is present.
   auto const b_start_5 = ultra_idx_5.profiles_[0].out_offsets_[b_idx];
   auto const b_end_5 = ultra_idx_5.profiles_[0].out_offsets_[b_idx + 1];
-  bool found_b_to_c_5 = false;
+  bool found_b_to_x_5 = false;
+  bool found_emitted_b_to_c_5 = false;
   for (auto i = b_start_5; i < b_end_5; ++i) {
+    if (ultra_idx_5.profiles_[0].out_edges_[i].target_ == loc_x) {
+      found_b_to_x_5 = true;
+    }
     if (ultra_idx_5.profiles_[0].out_edges_[i].target_ == loc_c) {
-      found_b_to_c_5 = true;
+      found_emitted_b_to_c_5 = true;
     }
   }
-  EXPECT_FALSE(found_b_to_c_5);
+  EXPECT_TRUE(found_b_to_x_5);
+  // Prove that witness_transfer_limit_minutes = 5 PRUNED the witness search relaxation from X to C,
+  // so NO shortcut B -> C was emitted!
+  EXPECT_FALSE(found_emitted_b_to_c_5);
 
   // 3. Scalar search parity for query A -> D requiring the intermediate transfer.
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
