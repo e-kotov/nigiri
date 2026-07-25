@@ -69,6 +69,12 @@ routing_result tad_route(
 
     std::vector<tad_transfer_edge> transfer_edges_buf;
 
+    struct expanded_start_info {
+        location_idx_t root_loc_;
+        duration_t fp_dur_;
+    };
+    hash_map<location_idx_t, expanded_start_info> expanded_start_footpaths;
+
     for (auto const& o : q.start_) {
         if (o.duration() > q.max_start_offset_) continue;
         for_each_meta(tt, q.start_match_mode_, o.target(), [&](location_idx_t const l) {
@@ -77,9 +83,12 @@ routing_result tad_route(
                 transfer_edges_buf.clear();
                 transfer_provider->stop_transfers(l, fwd, transfer_edges_buf);
                 for (auto const& fp : transfer_edges_buf) {
-                    auto const combined_dur = o.duration() + adjusted_transfer_time(q.transfer_time_settings_, fp.duration_);
+                    if (fp.target_ == l) continue;
+                    auto const transfer_dur = adjusted_transfer_time(q.transfer_time_settings_, fp.duration_);
+                    auto const combined_dur = o.duration() + transfer_dur;
                     if (combined_dur <= q.max_start_offset_) {
                         add_start_location(fp.target_, combined_dur);
+                        expanded_start_footpaths[fp.target_] = expanded_start_info{l, fp.duration_};
                     }
                 }
             }
@@ -116,7 +125,12 @@ routing_result tad_route(
 
     std::vector<uint8_t> route_active(tt.n_routes(), 0);
 
-    auto const run_search_and_reconstruct = [&](
+    std::function<void(
+        std::vector<std::pair<location_idx_t, delta_t>> const&,
+        unixtime_t const,
+        day_idx_t const,
+        date::sys_days const,
+        delta_t const)> run_search_and_reconstruct = [&](
         std::vector<std::pair<location_idx_t, delta_t>> const& initial_starts,
         unixtime_t const cur_query_time,
         day_idx_t const cur_search_base_day,
@@ -124,6 +138,13 @@ routing_result tad_route(
         delta_t const cur_query_delta) {
 
         auto current_starts = initial_starts;
+
+        struct expanded_egress_info {
+            location_idx_t target_stop_;
+            location_idx_t final_dest_loc_;
+            duration_t egress_dur_;
+        };
+        std::vector<expanded_egress_info> expanded_egress_targets;
 
         for (std::size_t leg_idx = 0; leg_idx <= K; ++leg_idx) {
             auto& current_state = (K == 0) ? t_state : states[leg_idx];
@@ -149,8 +170,11 @@ routing_result tad_route(
                         transfer_edges_buf.clear();
                         transfer_provider->stop_transfers(dest_loc, !fwd, transfer_edges_buf);
                         for (auto const& fp : transfer_edges_buf) {
-                            auto const combined_dur = dest_offset.duration() + adjusted_transfer_time(q.transfer_time_settings_, fp.duration_);
+                            if (fp.target_ == dest_loc) continue;
+                            auto const transfer_dur = adjusted_transfer_time(q.transfer_time_settings_, fp.duration_);
+                            auto const combined_dur = dest_offset.duration() + transfer_dur;
                             add_target(fp.target_, combined_dur);
+                            expanded_egress_targets.push_back(expanded_egress_info{fp.target_, dest_loc, fp.duration_});
                         }
                     });
                 }
@@ -164,8 +188,11 @@ routing_result tad_route(
                         transfer_edges_buf.clear();
                         transfer_provider->stop_transfers(dest_loc, !fwd, transfer_edges_buf);
                         for (auto const& fp : transfer_edges_buf) {
-                            auto const combined_dur = min_dur + adjusted_transfer_time(q.transfer_time_settings_, fp.duration_);
+                            if (fp.target_ == dest_loc) continue;
+                            auto const transfer_dur = adjusted_transfer_time(q.transfer_time_settings_, fp.duration_);
+                            auto const combined_dur = min_dur + transfer_dur;
                             add_target(fp.target_, combined_dur);
+                            expanded_egress_targets.push_back(expanded_egress_info{fp.target_, dest_loc, fp.duration_});
                         }
                     }
                 }
@@ -214,6 +241,41 @@ routing_result tad_route(
             }
         }
 
+        auto& state_final = (K == 0) ? t_state : states[K];
+
+        for (auto const& egress_info : expanded_egress_targets) {
+            auto const s_idx = cista::to_idx(egress_info.target_stop_);
+            if (s_idx >= state_final.node_labels_.size()) continue;
+            auto const& s_lbl = state_final.node_labels_[s_idx];
+            if (s_lbl.time_stamp_ != state_final.current_time_stamp_ || s_lbl.arrival_time_ == invalid_delta) continue;
+
+            auto const transfer_dur = adjusted_transfer_time(q.transfer_time_settings_, egress_info.egress_dur_);
+            auto const arr_dest = fwd ? clamp(s_lbl.arrival_time_ + transfer_dur.count())
+                                      : clamp(s_lbl.arrival_time_ - transfer_dur.count());
+
+            auto const dest_idx = cista::to_idx(egress_info.final_dest_loc_);
+            if (dest_idx >= state_final.node_labels_.size()) continue;
+            auto& dest_lbl = state_final.node_labels_[dest_idx];
+
+            bool update = false;
+            if (dest_lbl.time_stamp_ != state_final.current_time_stamp_ || dest_lbl.arrival_time_ == invalid_delta) {
+                update = true;
+            } else {
+                if (fwd ? arr_dest < dest_lbl.arrival_time_ : arr_dest > dest_lbl.arrival_time_) {
+                    update = true;
+                }
+            }
+
+            if (update) {
+                dest_lbl.arrival_time_ = arr_dest;
+                dest_lbl.parent_ = egress_info.target_stop_;
+                dest_lbl.reached_by_walking_ = true;
+                dest_lbl.parent_transport_ = transport_idx_t::invalid();
+                dest_lbl.parent_day_ = day_idx_t::invalid();
+                dest_lbl.time_stamp_ = state_final.current_time_stamp_;
+            }
+        }
+
         auto const find_root = [&](tad_state const& state, location_idx_t loc) {
             for (auto i = 0U; i != state.node_labels_.size(); ++i) {
                 auto const& label = state.node_labels_[cista::to_idx(loc)];
@@ -225,10 +287,11 @@ routing_result tad_route(
             return location_idx_t::invalid();
         };
 
-        auto const reconstruct_path = [&](tad_state const& state,
-                                          location_idx_t const reach_loc,
-                                          location_idx_t const root_loc,
-                                          journey& j) {
+        std::function<void(tad_state const&, location_idx_t const, location_idx_t const, journey&)> reconstruct_path =
+            [&](tad_state const& state,
+                location_idx_t const reach_loc,
+                location_idx_t const root_loc,
+                journey& j) {
             if (fwd) {
                 routing::tad_reconstruct_journey(tt, q.transfer_time_settings_, state, root_loc, reach_loc, q.prf_idx_, cur_search_base_date, cur_search_base_day, j);
             } else {
@@ -322,9 +385,6 @@ routing_result tad_route(
                 }
             }
         };
-
-        auto const& state_final = (K == 0) ? t_state : states[K];
-
         auto const add_journey_for_dest = [&](location_idx_t const dest_loc, offset const dest_offset) {
             if (cista::to_idx(dest_loc) >= state_final.node_labels_.size()) return;
             auto const& dest_label = state_final.node_labels_[cista::to_idx(dest_loc)];
@@ -406,6 +466,18 @@ routing_result tad_route(
                     j.legs_.insert(j.legs_.begin(), journey::leg{
                         direction::kForward, get_special_station(special_station::kStart), start_loc,
                         start_dep, core_dep, start_match
+                    });
+                }
+            } else if (fwd) {
+                auto const start_fp_it = expanded_start_footpaths.find(start_loc);
+                if (start_fp_it != expanded_start_footpaths.end()) {
+                    auto const& info = start_fp_it->second;
+                    auto const core_dep = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
+                    auto const walk_dur = std::chrono::minutes{info.fp_dur_.count()};
+                    auto const walk_dep = core_dep - walk_dur;
+                    j.legs_.insert(j.legs_.begin(), journey::leg{
+                        direction::kForward, info.root_loc_, start_loc,
+                        walk_dep, core_dep, footpath{info.root_loc_, info.fp_dur_}
                     });
                 }
             }

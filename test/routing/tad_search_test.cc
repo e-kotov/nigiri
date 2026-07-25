@@ -1264,7 +1264,7 @@ TEST(routing, tad_ultra_builder_limit_validation) {
   EXPECT_TRUE(found_b_to_c_large);
 }
 
-TEST(routing, tad_access_egress_shortcut_integration) {
+TEST(routing, tad_access_shortcut_integration) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   tt.date_range_ = full_period();
@@ -1290,28 +1290,106 @@ TEST(routing, tad_access_egress_shortcut_integration) {
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
   routing::query q;
   q.start_time_ = start_time;
-  q.start_.push_back(routing::offset{loc_b, 5_minutes, 0});
+  q.start_.push_back(routing::offset{loc_b, 0_minutes, 0});
   q.use_start_footpaths_ = true;
   q.max_start_offset_ = 20_minutes;
-  q.destination_.push_back(routing::offset{loc_d, 2_minutes, 0});
+  q.destination_.push_back(routing::offset{loc_d, 0_minutes, 0});
 
-  // 1. Default search (no transfer_index provided)
-  routing::search_state s_state_default;
-  routing::tad_state t_state_default;
-  auto const res_default = routing::tad_route(
-      tt, nullptr, s_state_default, t_state_default, q, direction::kForward);
-
-  // 2. Shortcut search with ULTRA transfer_index
+  // 1. Shortcut search with ULTRA transfer_index
   routing::search_state s_state_shortcut;
   routing::tad_state t_state_shortcut;
   auto const res_shortcut = routing::tad_route(
       tt, nullptr, s_state_shortcut, t_state_shortcut, q, direction::kForward,
       std::nullopt, &ultra_idx);
 
+  ASSERT_EQ(1U, res_shortcut.journeys_->size());
+  auto const& j_shortcut = *res_shortcut.journeys_->begin();
+  EXPECT_EQ(unixtime_t{sys_days{2020_y / March / 30}} + 2_hours + 45_minutes,
+            j_shortcut.dest_time_);
+  // Access shortcut replaces B->X (3m) and X->C (4m) with direct B->C (7m) access leg. Total 2 legs: B->C walk + C->D train.
+  ASSERT_EQ(2U, j_shortcut.legs_.size());
+  EXPECT_EQ(loc_b, j_shortcut.legs_[0].from_);
+  EXPECT_EQ(loc_c, j_shortcut.legs_[0].to_);
+  EXPECT_EQ(7_minutes, j_shortcut.legs_[0].arr_time_ - j_shortcut.legs_[0].dep_time_);
+
+  // 2. Default search without shortcut index (uses base footpaths only: B->X (3m) and X->C (4m), yielding 3 legs)
+  routing::search_state s_state_default;
+  routing::tad_state t_state_default;
+  auto const res_default = routing::tad_route(
+      tt, nullptr, s_state_default, t_state_default, q, direction::kForward);
+
   ASSERT_EQ(1U, res_default.journeys_->size());
-  ASSERT_EQ(res_default.journeys_->size(), res_shortcut.journeys_->size());
-  EXPECT_EQ(res_default.journeys_->begin()->dest_time_,
-            res_shortcut.journeys_->begin()->dest_time_);
+  auto const& j_default = *res_default.journeys_->begin();
+  EXPECT_EQ(j_shortcut.dest_time_, j_default.dest_time_);
+  ASSERT_EQ(3U, j_default.legs_.size());
+  EXPECT_EQ(loc_b, j_default.legs_[0].from_);
+  EXPECT_EQ(loc_x, j_default.legs_[0].to_);
+  EXPECT_EQ(3_minutes, j_default.legs_[0].arr_time_ - j_default.legs_[0].dep_time_);
+}
+
+TEST(routing, tad_egress_shortcut_integration) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+
+  auto const loc_a = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const loc_x = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000004", src});
+
+  tt.locations_.footpaths_out_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_in_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_out_[0][loc_b].push_back(footpath{loc_x, 3_minutes});
+  tt.locations_.footpaths_in_[0][loc_x].push_back(footpath{loc_b, 3_minutes});
+  tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
+  tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
+
+  finalize(tt);
+
+  auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
+  ASSERT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
+
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+  routing::query q;
+  q.start_time_ = start_time;
+  q.start_.push_back(routing::offset{loc_a, 0_minutes, 0});
+  q.destination_.push_back(routing::offset{loc_c, 0_minutes, 0});
+
+  // 1. Shortcut search with ULTRA transfer_index (destination C reached via egress shortcut B->C)
+  routing::search_state s_state_shortcut;
+  routing::tad_state t_state_shortcut;
+  auto const res_shortcut = routing::tad_route(
+      tt, nullptr, s_state_shortcut, t_state_shortcut, q, direction::kForward,
+      std::nullopt, &ultra_idx);
+
+  ASSERT_EQ(1U, res_shortcut.journeys_->size());
+  auto const& j_shortcut = *res_shortcut.journeys_->begin();
+  // Arrival at B via Train 1 is 02:30. Egress shortcut B->C (7m) yields arrival at C at 02:37.
+  EXPECT_EQ(unixtime_t{sys_days{2020_y / March / 30}} + 2_hours + 37_minutes,
+            j_shortcut.dest_time_);
+  // Reconstructed journey uses 2 legs: Leg 0 is train A->B, Leg 1 is egress shortcut B->C (7m).
+  ASSERT_EQ(2U, j_shortcut.legs_.size());
+  EXPECT_EQ(loc_b, j_shortcut.legs_[1].from_);
+  EXPECT_EQ(loc_c, j_shortcut.legs_[1].to_);
+  EXPECT_EQ(7_minutes, j_shortcut.legs_[1].arr_time_ - j_shortcut.legs_[1].dep_time_);
+
+  // 2. Default search without shortcut index (uses base footpaths B->X (3m) and X->C (4m), yielding 3 legs)
+  routing::search_state s_state_default;
+  routing::tad_state t_state_default;
+  auto const res_default = routing::tad_route(
+      tt, nullptr, s_state_default, t_state_default, q, direction::kForward);
+
+  ASSERT_EQ(1U, res_default.journeys_->size());
+  auto const& j_default = *res_default.journeys_->begin();
+  EXPECT_EQ(j_shortcut.dest_time_, j_default.dest_time_);
+  ASSERT_EQ(3U, j_default.legs_.size());
+  EXPECT_EQ(loc_b, j_default.legs_[1].from_);
+  EXPECT_EQ(loc_x, j_default.legs_[1].to_);
+  EXPECT_EQ(3_minutes, j_default.legs_[1].arr_time_ - j_default.legs_[1].dep_time_);
+  EXPECT_EQ(loc_x, j_default.legs_[2].from_);
+  EXPECT_EQ(loc_c, j_default.legs_[2].to_);
+  EXPECT_EQ(4_minutes, j_default.legs_[2].arr_time_ - j_default.legs_[2].dep_time_);
 
   // 3. Fallback search with invalid transfer_index (must safely fall back to base footpaths)
   routing::tad_transfer_index invalid_idx = ultra_idx;
@@ -1325,6 +1403,7 @@ TEST(routing, tad_access_egress_shortcut_integration) {
   ASSERT_EQ(1U, res_invalid.journeys_->size());
   EXPECT_EQ(res_default.journeys_->begin()->dest_time_,
             res_invalid.journeys_->begin()->dest_time_);
+  EXPECT_EQ(3U, res_invalid.journeys_->begin()->legs_.size());
 }
 
 
