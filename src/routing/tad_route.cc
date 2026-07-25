@@ -48,6 +48,15 @@ routing_result tad_route(
     auto const search_base_date = tt.internal_interval_days().from_ + search_base_day.v_ * date::days{1};
     auto const query_delta = unix_to_delta(search_base_date, query_time);
     
+    std::unique_ptr<tad_transfer_provider> transfer_provider;
+    if (transfer_index != nullptr && q.transfer_time_settings_.default_ &&
+        transfer_index->is_valid_for(q.prf_idx_)) {
+        transfer_provider = std::make_unique<shortcut_transfer_provider>(
+            transfer_index->profiles_[cista::to_idx(q.prf_idx_)]);
+    } else {
+        transfer_provider = std::make_unique<footpath_transfer_provider>(tt, q.prf_idx_);
+    }
+
     std::vector<std::pair<location_idx_t, delta_t>> starts;
 
     auto const add_start_location = [&](location_idx_t const loc, duration_t const dur) {
@@ -58,17 +67,19 @@ routing_result tad_route(
         }
     };
 
+    std::vector<tad_transfer_edge> transfer_edges_buf;
+
     for (auto const& o : q.start_) {
         if (o.duration() > q.max_start_offset_) continue;
         for_each_meta(tt, q.start_match_mode_, o.target(), [&](location_idx_t const l) {
             add_start_location(l, o.duration());
             if (q.use_start_footpaths_) {
-                auto const footpaths = fwd ? tt.locations_.footpaths_out_[q.prf_idx_][l]
-                                           : tt.locations_.footpaths_in_[q.prf_idx_][l];
-                for (auto const& fp : footpaths) {
-                    auto const combined_dur = o.duration() + adjusted_transfer_time(q.transfer_time_settings_, fp.duration());
+                transfer_edges_buf.clear();
+                transfer_provider->stop_transfers(l, fwd, transfer_edges_buf);
+                for (auto const& fp : transfer_edges_buf) {
+                    auto const combined_dur = o.duration() + adjusted_transfer_time(q.transfer_time_settings_, fp.duration_);
                     if (combined_dur <= q.max_start_offset_) {
-                        add_start_location(fp.target(), combined_dur);
+                        add_start_location(fp.target_, combined_dur);
                     }
                 }
             }
@@ -121,9 +132,26 @@ routing_result tad_route(
             std::vector<std::pair<location_idx_t, duration_t>> current_targets;
             bool enable_pruning = (leg_idx == K) && (is_interval_query || q.min_connection_count_ <= 1);
             if (enable_pruning) {
+                auto const add_target = [&](location_idx_t const loc, duration_t const dur) {
+                    auto const idx = cista::to_idx(loc);
+                    for (auto& [t_loc, t_dur] : current_targets) {
+                        if (cista::to_idx(t_loc) == idx) {
+                            t_dur = std::min(t_dur, dur);
+                            return;
+                        }
+                    }
+                    current_targets.emplace_back(loc, dur);
+                };
+
                 for (auto const& dest_offset : q.destination_) {
                     for_each_meta(tt, q.dest_match_mode_, dest_offset.target(), [&](location_idx_t const dest_loc) {
-                        current_targets.emplace_back(dest_loc, dest_offset.duration());
+                        add_target(dest_loc, dest_offset.duration());
+                        transfer_edges_buf.clear();
+                        transfer_provider->stop_transfers(dest_loc, !fwd, transfer_edges_buf);
+                        for (auto const& fp : transfer_edges_buf) {
+                            auto const combined_dur = dest_offset.duration() + adjusted_transfer_time(q.transfer_time_settings_, fp.duration_);
+                            add_target(fp.target_, combined_dur);
+                        }
                     });
                 }
                 for (auto const& [dest_loc, td_offsets] : q.td_dest_) {
@@ -132,7 +160,13 @@ routing_result tad_route(
                         min_dur = std::min(min_dur, offset.duration());
                     }
                     if (min_dur.count() != std::numeric_limits<duration_t::rep>::max()) {
-                        current_targets.emplace_back(dest_loc, min_dur);
+                        add_target(dest_loc, min_dur);
+                        transfer_edges_buf.clear();
+                        transfer_provider->stop_transfers(dest_loc, !fwd, transfer_edges_buf);
+                        for (auto const& fp : transfer_edges_buf) {
+                            auto const combined_dur = min_dur + adjusted_transfer_time(q.transfer_time_settings_, fp.duration_);
+                            add_target(fp.target_, combined_dur);
+                        }
                     }
                 }
             }

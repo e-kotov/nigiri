@@ -1264,6 +1264,70 @@ TEST(routing, tad_ultra_builder_limit_validation) {
   EXPECT_TRUE(found_b_to_c_large);
 }
 
+TEST(routing, tad_access_egress_shortcut_integration) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+
+  auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
+  auto const loc_x = tt.locations_.location_id_to_idx_.at({"0000003", src});
+  auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000004", src});
+  auto const loc_d = tt.locations_.location_id_to_idx_.at({"0000005", src});
+
+  tt.locations_.footpaths_out_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_in_[0].resize(tt.n_locations());
+  tt.locations_.footpaths_out_[0][loc_b].push_back(footpath{loc_x, 3_minutes});
+  tt.locations_.footpaths_in_[0][loc_x].push_back(footpath{loc_b, 3_minutes});
+  tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
+  tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
+
+  finalize(tt);
+
+  auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
+  ASSERT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
+
+  auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+  routing::query q;
+  q.start_time_ = start_time;
+  q.start_.push_back(routing::offset{loc_b, 5_minutes, 0});
+  q.use_start_footpaths_ = true;
+  q.max_start_offset_ = 20_minutes;
+  q.destination_.push_back(routing::offset{loc_d, 2_minutes, 0});
+
+  // 1. Default search (no transfer_index provided)
+  routing::search_state s_state_default;
+  routing::tad_state t_state_default;
+  auto const res_default = routing::tad_route(
+      tt, nullptr, s_state_default, t_state_default, q, direction::kForward);
+
+  // 2. Shortcut search with ULTRA transfer_index
+  routing::search_state s_state_shortcut;
+  routing::tad_state t_state_shortcut;
+  auto const res_shortcut = routing::tad_route(
+      tt, nullptr, s_state_shortcut, t_state_shortcut, q, direction::kForward,
+      std::nullopt, &ultra_idx);
+
+  ASSERT_EQ(1U, res_default.journeys_->size());
+  ASSERT_EQ(res_default.journeys_->size(), res_shortcut.journeys_->size());
+  EXPECT_EQ(res_default.journeys_->begin()->dest_time_,
+            res_shortcut.journeys_->begin()->dest_time_);
+
+  // 3. Fallback search with invalid transfer_index (must safely fall back to base footpaths)
+  routing::tad_transfer_index invalid_idx = ultra_idx;
+  invalid_idx.version_ = 999;
+  routing::search_state s_state_invalid;
+  routing::tad_state t_state_invalid;
+  auto const res_invalid = routing::tad_route(
+      tt, nullptr, s_state_invalid, t_state_invalid, q, direction::kForward,
+      std::nullopt, &invalid_idx);
+
+  ASSERT_EQ(1U, res_invalid.journeys_->size());
+  EXPECT_EQ(res_default.journeys_->begin()->dest_time_,
+            res_invalid.journeys_->begin()->dest_time_);
+}
+
+
 
 
 
