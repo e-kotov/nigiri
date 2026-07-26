@@ -1627,7 +1627,7 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   {
     timetable tt_mut = tt;
     if (!tt_mut.route_stop_times_.empty()) {
-      tt_mut.route_stop_times_[0] = tt_mut.route_stop_times_[0] + duration_t{5};
+      tt_mut.route_stop_times_[0U] = delta{5};
       EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
     }
   }
@@ -1635,8 +1635,9 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   // 2. Mutate footpaths_in_
   {
     timetable tt_mut = tt;
-    if (!tt_mut.locations_.footpaths_in_.empty() && !tt_mut.locations_.footpaths_in_[0].empty()) {
-      tt_mut.locations_.footpaths_in_[0][0].push_back(
+    if (!tt_mut.locations_.footpaths_in_.empty() &&
+        !tt_mut.locations_.footpaths_in_[profile_idx_t{0}].empty()) {
+      tt_mut.locations_.footpaths_in_[profile_idx_t{0}][location_idx_t{0}].push_back(
           footpath{location_idx_t{0}, duration_t{10}});
       EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
     }
@@ -1646,7 +1647,7 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   {
     timetable tt_mut = tt;
     if (!tt_mut.transport_route_.empty()) {
-      tt_mut.transport_route_[0] = route_idx_t{999};
+      tt_mut.transport_route_[transport_idx_t{0}] = route_idx_t{999};
       EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
     }
   }
@@ -1661,19 +1662,15 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   // 5. Mutate location_routes_
   {
     timetable tt_mut = tt;
-    if (!tt_mut.location_routes_.empty()) {
-      tt_mut.location_routes_[0].push_back(route_idx_t{999});
-      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
-    }
+    tt_mut.location_routes_.emplace_back(std::vector<route_idx_t>{route_idx_t{999}});
+    EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
   }
 
   // 6. Mutate children_
   {
     timetable tt_mut = tt;
-    if (!tt_mut.locations_.children_.empty()) {
-      tt_mut.locations_.children_[0].push_back(location_idx_t{999});
-      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
-    }
+    tt_mut.locations_.children_.clear();
+    EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
   }
 }
 
