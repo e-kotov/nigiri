@@ -63,15 +63,17 @@ struct tad_transfer_index {
 
     auto const n_parents = tt.locations_.parents_.size();
     for (std::size_t i = 0; i < std::min<std::size_t>(n_parents, 100); ++i) {
-      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(tt.locations_.parents_[i])));
+      auto const loc = location_idx_t{static_cast<std::uint32_t>(i)};
+      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(tt.locations_.parents_[loc])));
     }
     auto const n_routes = tt.route_location_seq_.size();
     for (std::size_t r = 0; r < std::min<std::size_t>(n_routes, 50); ++r) {
-      auto const seq = tt.route_location_seq_[r];
+      auto const route_idx = route_idx_t{static_cast<std::uint32_t>(r)};
+      auto const seq = tt.route_location_seq_[route_idx];
       fnv_combine(static_cast<std::uint64_t>(seq.size()));
       if (!seq.empty()) {
-        fnv_combine(static_cast<std::uint64_t>(stop{seq.front()}.location_idx().v_));
-        fnv_combine(static_cast<std::uint64_t>(stop{seq.back()}.location_idx().v_));
+        fnv_combine(static_cast<std::uint64_t>(stop{seq[0]}.location_idx().v_));
+        fnv_combine(static_cast<std::uint64_t>(stop{seq[seq.size() - 1U]}.location_idx().v_));
       }
     }
     return fp;
