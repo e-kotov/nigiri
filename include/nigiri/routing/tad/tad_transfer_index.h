@@ -57,7 +57,6 @@ struct tad_transfer_index {
   }
 
   bool is_valid_for(timetable const& tt, profile_idx_t const prf_idx, int const witness_limit) const {
-    auto const p_idx = cista::to_idx(prf_idx);
     return is_valid_for(prf_idx) &&
            n_locations_ == static_cast<std::uint32_t>(tt.locations_.parents_.size()) &&
            witness_limit_minutes_ == static_cast<std::uint32_t>(witness_limit) &&
