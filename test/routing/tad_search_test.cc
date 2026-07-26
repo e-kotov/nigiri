@@ -933,16 +933,12 @@ TEST(routing, tad_shortcut_scalar_parity) {
 
   routing::search_state s_state_shortcut;
   routing::tad_state t_state_shortcut;
-  routing::tad_search search_shortcut(
-      tt, nullptr, t_state_shortcut, q.transfer_time_settings_, q.prf_idx_,
-      q.allowed_claszes_, q.require_bike_transport_, q.require_car_transport_,
-      day_idx_t{0}, direction::kForward, true, delta_t{0}, q.max_travel_time_,
-      q.max_transfers_, nullptr, bitfield{}, &transfer_idx);
-  EXPECT_STREQ("shortcut_transfer_provider", search_shortcut.transfer_provider_name());
-
   auto const res_shortcut = routing::tad_route(
       tt, nullptr, s_state_shortcut, t_state_shortcut, q, direction::kForward,
       std::nullopt, &transfer_idx);
+
+  EXPECT_EQ(0ULL, res_default.algo_stats_.at("tad_using_shortcut_provider"));
+  EXPECT_EQ(1ULL, res_shortcut.algo_stats_.at("tad_using_shortcut_provider"));
 
   ASSERT_EQ(res_default.journeys_->size(), res_shortcut.journeys_->size());
   if (!res_default.journeys_->empty()) {
@@ -1054,16 +1050,12 @@ TEST(routing, tad_ultra_shortcut_scalar_parity) {
 
   routing::search_state s_state_shortcut;
   routing::tad_state t_state_shortcut;
-  routing::tad_search search_shortcut(
-      tt, nullptr, t_state_shortcut, q.transfer_time_settings_, q.prf_idx_,
-      q.allowed_claszes_, q.require_bike_transport_, q.require_car_transport_,
-      day_idx_t{0}, direction::kForward, true, delta_t{0}, q.max_travel_time_,
-      q.max_transfers_, nullptr, bitfield{}, &ultra_idx);
-  EXPECT_STREQ("shortcut_transfer_provider", search_shortcut.transfer_provider_name());
-
   auto const res_shortcut = routing::tad_route(
       tt, nullptr, s_state_shortcut, t_state_shortcut, q, direction::kForward,
       std::nullopt, &ultra_idx);
+
+  EXPECT_EQ(0ULL, res_default.algo_stats_.at("tad_using_shortcut_provider"));
+  EXPECT_EQ(1ULL, res_shortcut.algo_stats_.at("tad_using_shortcut_provider"));
 
   ASSERT_EQ(res_default.journeys_->size(), res_shortcut.journeys_->size());
   if (!res_default.journeys_->empty()) {

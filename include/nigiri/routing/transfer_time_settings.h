@@ -11,6 +11,11 @@ struct transfer_time_settings {
                std::tie(o.min_transfer_time_, additional_time_, o.factor_);
   }
 
+  bool is_default() const {
+    return default_ || (min_transfer_time_ == duration_t{0} &&
+                        additional_time_ == duration_t{0} && factor_ == 1.0F);
+  }
+
   bool default_{true};
   duration_t min_transfer_time_{0};
   duration_t additional_time_{0};

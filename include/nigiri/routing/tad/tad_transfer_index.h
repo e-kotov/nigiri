@@ -60,22 +60,67 @@ struct tad_transfer_index {
     fnv_combine(static_cast<std::uint64_t>(tt.route_location_seq_.size()));
     fnv_combine(static_cast<std::uint64_t>(tt.transport_traffic_days_.size()));
     fnv_combine(static_cast<std::uint64_t>(tt.locations_.parents_.size()));
+    fnv_combine(static_cast<std::uint64_t>(tt.locations_.equivalences_.size()));
+    fnv_combine(static_cast<std::uint64_t>(tt.bitfields_.size()));
 
-    auto const n_parents = tt.locations_.parents_.size();
-    for (std::size_t i = 0; i < std::min<std::size_t>(n_parents, 100); ++i) {
-      auto const loc = location_idx_t{static_cast<std::uint32_t>(i)};
-      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(tt.locations_.parents_[loc])));
+    // Hash all parent relationships
+    for (auto const p : tt.locations_.parents_) {
+      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(p)));
     }
-    auto const n_routes = tt.route_location_seq_.size();
-    for (std::size_t r = 0; r < std::min<std::size_t>(n_routes, 50); ++r) {
-      auto const route_idx = route_idx_t{static_cast<std::uint32_t>(r)};
-      auto const seq = tt.route_location_seq_[route_idx];
-      fnv_combine(static_cast<std::uint64_t>(seq.size()));
-      if (!seq.empty()) {
-        fnv_combine(static_cast<std::uint64_t>(stop{seq[0]}.location_idx().v_));
-        fnv_combine(static_cast<std::uint64_t>(stop{seq[seq.size() - 1U]}.location_idx().v_));
+
+    // Hash all location equivalences
+    for (auto const& eq : tt.locations_.equivalences_) {
+      fnv_combine(static_cast<std::uint64_t>(eq.size()));
+      for (auto const loc : eq) {
+        fnv_combine(static_cast<std::uint64_t>(cista::to_idx(loc)));
       }
     }
+
+    // Hash all footpaths and durations across profile layers
+    for (auto const& prf_footpaths : tt.locations_.footpaths_out_) {
+      fnv_combine(static_cast<std::uint64_t>(prf_footpaths.size()));
+      for (auto const& fps : prf_footpaths) {
+        fnv_combine(static_cast<std::uint64_t>(fps.size()));
+        for (auto const& fp_elem : fps) {
+          fnv_combine(static_cast<std::uint64_t>(cista::to_idx(fp_elem.target())));
+          fnv_combine(static_cast<std::uint64_t>(fp_elem.duration().count()));
+        }
+      }
+    }
+
+    // Hash all route location sequences
+    for (auto const& seq : tt.route_location_seq_) {
+      fnv_combine(static_cast<std::uint64_t>(seq.size()));
+      for (auto const stp : seq) {
+        fnv_combine(static_cast<std::uint64_t>(stop{stp}.location_idx().v_));
+      }
+    }
+
+    // Hash route transport ranges
+    for (auto const& range : tt.route_transport_ranges_) {
+      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(range.from_)));
+      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(range.to_)));
+    }
+
+    // Hash transport traffic day indices
+    for (auto const td : tt.transport_traffic_days_) {
+      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(td)));
+    }
+
+    // Hash bitfield bit blocks
+    for (auto const& bf : tt.bitfields_) {
+      fnv_combine(static_cast<std::uint64_t>(bf.size()));
+      for (std::size_t b = 0; b < bf.size(); b += 64) {
+        std::uint64_t word = 0;
+        for (std::size_t k = 0; k < 64 && (b + k) < bf.size(); ++k) {
+          if (bf.test(b + k)) {
+            word |= (1ULL << k);
+          }
+        }
+        fnv_combine(word);
+      }
+    }
+
     return fp;
   }
 
@@ -110,7 +155,7 @@ struct tad_transfer_index {
            timetable_n_routes_ == static_cast<std::uint64_t>(tt.route_location_seq_.size()) &&
            timetable_n_transports_ == static_cast<std::uint64_t>(tt.transport_traffic_days_.size()) &&
            timetable_fingerprint_ == expected_tt_fp &&
-           tts.default_;
+           tts.is_default();
   }
 
   bool write(std::filesystem::path const& path) const {

@@ -673,6 +673,10 @@ routing_result tad_route(
     search_stats search_stats_out;
     search_stats_out.execute_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(execution_duration);
     
+    bool const using_shortcut_provider =
+        (transfer_provider != nullptr &&
+         std::string_view(transfer_provider->name()) == "shortcut_transfer_provider");
+
     std::map<std::string, std::uint64_t> algo_stats_out = {
         {"tad_settled_stop_labels", total_stats.settled_stop_labels_},
         {"tad_scanned_routes", total_stats.scanned_routes_},
@@ -685,6 +689,7 @@ routing_result tad_route(
         {"tad_time_footpaths_us", total_stats.time_footpaths_us_},
         {"tad_time_routes_us", total_stats.time_routes_us_},
         {"tad_time_rt_transports_us", total_stats.time_rt_transports_us_},
+        {"tad_using_shortcut_provider", using_shortcut_provider ? 1ULL : 0ULL},
         {"tad_engine_used", 1ULL}
     };
 
