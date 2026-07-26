@@ -6,9 +6,11 @@ namespace nigiri::routing {
 
 struct transfer_time_settings {
   bool operator==(transfer_time_settings const& o) const {
-    return default_ == o.default_ ||
-           std::tie(min_transfer_time_, additional_time_, factor_) ==
-               std::tie(o.min_transfer_time_, additional_time_, o.factor_);
+    if (default_ && o.default_) {
+      return true;
+    }
+    return std::tie(default_, min_transfer_time_, additional_time_, factor_) ==
+           std::tie(o.default_, o.min_transfer_time_, o.additional_time_, o.factor_);
   }
 
   bool is_default() const {

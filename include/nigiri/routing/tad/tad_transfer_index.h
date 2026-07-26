@@ -62,6 +62,8 @@ struct tad_transfer_index {
     fnv_combine(static_cast<std::uint64_t>(tt.locations_.parents_.size()));
     fnv_combine(static_cast<std::uint64_t>(tt.locations_.equivalences_.size()));
     fnv_combine(static_cast<std::uint64_t>(tt.bitfields_.size()));
+    fnv_combine(static_cast<std::uint64_t>(tt.route_stop_times_.size()));
+    fnv_combine(static_cast<std::uint64_t>(tt.transport_route_.size()));
 
     // Hash all parent relationships
     for (auto const p : tt.locations_.parents_) {
@@ -76,8 +78,20 @@ struct tad_transfer_index {
       }
     }
 
-    // Hash all footpaths and durations across profile layers
+    // Hash all footpaths_out and durations across profile layers
     for (auto const& prf_footpaths : tt.locations_.footpaths_out_) {
+      fnv_combine(static_cast<std::uint64_t>(prf_footpaths.size()));
+      for (auto const& fps : prf_footpaths) {
+        fnv_combine(static_cast<std::uint64_t>(fps.size()));
+        for (auto const& fp_elem : fps) {
+          fnv_combine(static_cast<std::uint64_t>(cista::to_idx(fp_elem.target())));
+          fnv_combine(static_cast<std::uint64_t>(fp_elem.duration().count()));
+        }
+      }
+    }
+
+    // Hash all footpaths_in and durations across profile layers
+    for (auto const& prf_footpaths : tt.locations_.footpaths_in_) {
       fnv_combine(static_cast<std::uint64_t>(prf_footpaths.size()));
       for (auto const& fps : prf_footpaths) {
         fnv_combine(static_cast<std::uint64_t>(fps.size()));
@@ -100,6 +114,22 @@ struct tad_transfer_index {
     for (auto const& range : tt.route_transport_ranges_) {
       fnv_combine(static_cast<std::uint64_t>(cista::to_idx(range.from_)));
       fnv_combine(static_cast<std::uint64_t>(cista::to_idx(range.to_)));
+    }
+
+    // Hash route stop time ranges
+    for (auto const& range : tt.route_stop_time_ranges_) {
+      fnv_combine(static_cast<std::uint64_t>(range.from_));
+      fnv_combine(static_cast<std::uint64_t>(range.to_));
+    }
+
+    // Hash route stop times (event times)
+    for (auto const d : tt.route_stop_times_) {
+      fnv_combine(static_cast<std::uint64_t>(d.count()));
+    }
+
+    // Hash transport route mapping
+    for (auto const r : tt.transport_route_) {
+      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(r)));
     }
 
     // Hash transport traffic day indices
