@@ -4,10 +4,14 @@
 #include <chrono>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <queue>
 #include <set>
 #include <vector>
 
+#include "utl/parallel_for.h"
+
+#include "nigiri/common/day_list.h"
 #include "nigiri/routing/tad/tad_station_grouping.h"
 #include "nigiri/routing/tad/tad_transfer_index.h"
 #include "nigiri/stop.h"
@@ -142,328 +146,406 @@ private:
       location_idx_t route_parent_2_{location_idx_t::invalid()};
     };
 
-    std::vector<label> labels(n_locs);
-    std::uint32_t timestamp = 0;
+    struct thread_state {
+      std::vector<label> labels_;
+      std::uint32_t timestamp_{0};
+    };
 
     auto const kMaxTime = unixtime_t::max();
     auto const limit_dur = safe_limit_duration(witness_transfer_limit_minutes_);
-
-    auto const get_arr_0 = [&](location_idx_t l) {
-      auto const idx = cista::to_idx(l);
-      return (idx < n_locs && labels[idx].ts_0_ == timestamp) ? labels[idx].arr_0_ : kMaxTime;
-    };
-    auto const get_arr_1 = [&](location_idx_t l) {
-      auto const idx = cista::to_idx(l);
-      return (idx < n_locs && labels[idx].ts_1_ == timestamp) ? labels[idx].arr_1_ : kMaxTime;
-    };
-    auto const get_arr_2 = [&](location_idx_t l) {
-      auto const idx = cista::to_idx(l);
-      return (idx < n_locs && labels[idx].ts_2_ == timestamp) ? labels[idx].arr_2_ : kMaxTime;
-    };
 
     auto const* footpaths_out = prf < tt_.locations_.footpaths_out_.size()
                                     ? &tt_.locations_.footpaths_out_[prf]
                                     : nullptr;
 
-    auto const n_days = static_cast<std::size_t>(tt_.internal_interval_days().size().count());
+    std::mutex shortcut_mutex;
 
-    for (auto const& st : grouping.stations_) {
-      auto const rep = st.representative_;
-      if (rep == location_idx_t::invalid() || cista::to_idx(rep) >= n_locs) continue;
-
-      std::vector<duration_t> direct_dist(n_locs, duration_t::max());
-      std::vector<location_idx_t> direct_stops;
-
-      {
-        struct heap_entry {
-          location_idx_t loc_;
-          duration_t dist_;
-          bool operator>(heap_entry const& o) const { return dist_ > o.dist_; }
-        };
-        std::priority_queue<heap_entry, std::vector<heap_entry>, std::greater<>> pq;
-
-        direct_dist[cista::to_idx(rep)] = duration_t{0};
-        direct_stops.push_back(rep);
-        pq.push({rep, duration_t{0}});
-
-        while (!pq.empty()) {
-          auto const [u, d] = pq.top();
-          pq.pop();
-
-          auto const u_idx = cista::to_idx(u);
-          if (d > direct_dist[u_idx]) continue;
-
-          if (footpaths_out != nullptr && u_idx < footpaths_out->size()) {
-            for (auto const& fp : (*footpaths_out)[u]) {
-              auto const v = fp.target();
-              auto const v_idx = cista::to_idx(v);
-              if (v_idx < n_locs) {
-                auto const new_d = safe_duration_add(d, fp.duration());
-                if (new_d < direct_dist[v_idx]) {
-                  if (direct_dist[v_idx] == duration_t::max()) {
-                    direct_stops.push_back(v);
-                  }
-                  direct_dist[v_idx] = new_d;
-                  pq.push({v, new_d});
-                }
-              }
-            }
-          }
-        }
-      }
-
-      std::set<unixtime_t> departure_times;
-
-      for (auto const u : direct_stops) {
-        auto const u_idx = cista::to_idx(u);
-        auto const walk_d = direct_dist[u_idx];
-        if (u_idx >= tt_.location_routes_.size()) continue;
-
-        for (auto const r : tt_.location_routes_[u]) {
-          auto const stop_seq = tt_.route_location_seq_[r];
-          stop_idx_t stop_idx = 0;
-          for (std::size_t s = 0; s < stop_seq.size(); ++s) {
-            if (stop{stop_seq[s]}.location_idx() == u) {
-              stop_idx = static_cast<stop_idx_t>(s);
-              break;
-            }
+    utl::parallel_for_run_threadlocal<thread_state>(
+        grouping.stations_.size(),
+        [&](thread_state& state, auto const st_idx) {
+          if (state.labels_.size() < n_locs) {
+            state.labels_.resize(n_locs);
           }
 
-          auto const transports = tt_.route_transport_ranges_[r];
-          for (auto t = transports.from_; t != transports.to_; ++t) {
-            auto const traffic_days = tt_.transport_traffic_days_[t];
-            for (std::size_t d = 0; d < n_days; ++d) {
-              if (tt_.bitfields_[traffic_days].test(d)) {
-                auto const day = day_idx_t{static_cast<std::uint16_t>(d)};
-                auto const dep = tt_.event_time(transport{t, day}, stop_idx, event_type::kDep);
-                if (dep != unixtime_t::max() && dep >= unixtime_t{0_minutes} + walk_d) {
-                  departure_times.insert(dep - walk_d);
-                }
-              }
-            }
-          }
-        }
-      }
-
-      for (auto const dep_time : departure_times) {
-        ++timestamp;
-
-        for (auto const u : direct_stops) {
-          auto const u_idx = cista::to_idx(u);
-          labels[u_idx].ts_0_ = timestamp;
-          labels[u_idx].arr_0_ = dep_time + direct_dist[u_idx];
-        }
-
-        std::set<route_idx_t> r1_routes;
-        for (auto const u : direct_stops) {
-          auto const arr_0_u = get_arr_0(u);
-          if (arr_0_u == kMaxTime) continue;
-          auto const u_idx = cista::to_idx(u);
-          if (u_idx >= tt_.location_routes_.size()) continue;
-
-          for (auto const r : tt_.location_routes_[u]) {
-            r1_routes.insert(r);
-          }
-        }
-
-        std::vector<location_idx_t> r1_updated_stops;
-        for (auto const r : r1_routes) {
-          auto const stop_seq = tt_.route_location_seq_[r];
-          auto const transports = tt_.route_transport_ranges_[r];
-
-          for (std::size_t i = 0; i < stop_seq.size(); ++i) {
-            auto const board_stop = stop{stop_seq[i]}.location_idx();
-            auto const arr_0_board = get_arr_0(board_stop);
-            if (arr_0_board == kMaxTime) continue;
-
-            auto const board_stop_idx = static_cast<stop_idx_t>(i);
-
-            for (auto t = transports.from_; t != transports.to_; ++t) {
-              auto const traffic_days = tt_.transport_traffic_days_[t];
-              for (std::size_t d = 0; d < n_days; ++d) {
-                if (!tt_.bitfields_[traffic_days].test(d)) continue;
-                auto const day = day_idx_t{static_cast<std::uint16_t>(d)};
-                auto const dep = tt_.event_time(transport{t, day}, board_stop_idx, event_type::kDep);
-                if (dep >= arr_0_board) {
-                  for (std::size_t j = i + 1; j < stop_seq.size(); ++j) {
-                    auto const arr_stop = stop{stop_seq[j]}.location_idx();
-                    auto const arr_stop_idx = static_cast<stop_idx_t>(j);
-                    auto const arr_t = tt_.event_time(transport{t, day}, arr_stop_idx, event_type::kArr);
-                    if (arr_t < get_arr_1(arr_stop)) {
-                      auto const arr_idx = cista::to_idx(arr_stop);
-                      labels[arr_idx].ts_1_ = timestamp;
-                      labels[arr_idx].arr_1_ = arr_t;
-                      labels[arr_idx].transfer_parent_1_ = arr_stop;
-                      r1_updated_stops.push_back(arr_stop);
-                    }
-                  }
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        if (r1_updated_stops.empty()) continue;
-
-        std::vector<location_idx_t> t1_updated_stops;
-        {
-          struct heap_entry {
-            location_idx_t loc_;
-            unixtime_t arr_;
-            bool operator>(heap_entry const& o) const { return arr_ > o.arr_; }
+          auto const get_arr_0 = [&](location_idx_t l) {
+            auto const idx = cista::to_idx(l);
+            return (idx < n_locs && state.labels_[idx].ts_0_ == state.timestamp_)
+                       ? state.labels_[idx].arr_0_
+                       : kMaxTime;
           };
-          std::priority_queue<heap_entry, std::vector<heap_entry>, std::greater<>> pq;
-
-          for (auto const u : r1_updated_stops) {
-            pq.push({u, get_arr_1(u)});
-          }
-
-          while (!pq.empty()) {
-            auto const [u, arr] = pq.top();
-            pq.pop();
-
-            if (arr > get_arr_1(u)) continue;
-            t1_updated_stops.push_back(u);
-
-            auto const u_idx = cista::to_idx(u);
-            if (footpaths_out != nullptr && u_idx < footpaths_out->size()) {
-              auto const parent = labels[u_idx].transfer_parent_1_;
-              auto const parent_arr = get_arr_1(parent);
-              for (auto const& fp : (*footpaths_out)[u]) {
-                auto const v = fp.target();
-                auto const new_arr = arr + fp.duration();
-                if (parent_arr != kMaxTime && new_arr >= parent_arr &&
-                    (new_arr - parent_arr) <= limit_dur) {
-                  if (new_arr < get_arr_1(v)) {
-                    auto const v_idx = cista::to_idx(v);
-                    labels[v_idx].ts_1_ = timestamp;
-                    labels[v_idx].arr_1_ = new_arr;
-                    labels[v_idx].transfer_parent_1_ = parent;
-                    pq.push({v, new_arr});
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        if (t1_updated_stops.empty()) continue;
-
-        std::set<route_idx_t> r2_routes;
-        for (auto const u : t1_updated_stops) {
-          auto const u_idx = cista::to_idx(u);
-          if (u_idx >= tt_.location_routes_.size()) continue;
-
-          for (auto const r : tt_.location_routes_[u]) {
-            r2_routes.insert(r);
-          }
-        }
-
-        std::vector<location_idx_t> r2_updated_stops;
-        for (auto const r : r2_routes) {
-          auto const stop_seq = tt_.route_location_seq_[r];
-          auto const transports = tt_.route_transport_ranges_[r];
-
-          for (std::size_t i = 0; i < stop_seq.size(); ++i) {
-            auto const board_stop = stop{stop_seq[i]}.location_idx();
-            auto const arr_1_board = get_arr_1(board_stop);
-            if (arr_1_board == kMaxTime) continue;
-
-            auto const board_stop_idx = static_cast<stop_idx_t>(i);
-
-            for (auto t = transports.from_; t != transports.to_; ++t) {
-              auto const traffic_days = tt_.transport_traffic_days_[t];
-              for (std::size_t d = 0; d < n_days; ++d) {
-                if (!tt_.bitfields_[traffic_days].test(d)) continue;
-                auto const day = day_idx_t{static_cast<std::uint16_t>(d)};
-                auto const dep = tt_.event_time(transport{t, day}, board_stop_idx, event_type::kDep);
-                if (dep >= arr_1_board) {
-                  auto const board_idx = cista::to_idx(board_stop);
-                  auto const transfer_parent = labels[board_idx].transfer_parent_1_;
-
-                  for (std::size_t j = i + 1; j < stop_seq.size(); ++j) {
-                    auto const arr_stop = stop{stop_seq[j]}.location_idx();
-                    auto const arr_stop_idx = static_cast<stop_idx_t>(j);
-                    auto const arr_t = tt_.event_time(transport{t, day}, arr_stop_idx, event_type::kArr);
-                    if (arr_t < get_arr_2(arr_stop)) {
-                      auto const arr_idx = cista::to_idx(arr_stop);
-                      labels[arr_idx].ts_2_ = timestamp;
-                      labels[arr_idx].arr_2_ = arr_t;
-                      if (transfer_parent != location_idx_t::invalid() && transfer_parent != board_stop) {
-                        labels[arr_idx].route_parent_2_ = board_stop;
-                      } else {
-                        labels[arr_idx].route_parent_2_ = location_idx_t::invalid();
-                      }
-                      r2_updated_stops.push_back(arr_stop);
-                    }
-                  }
-                  break;
-                }
-              }
-            }
-          }
-        }
-
-        if (r2_updated_stops.empty()) continue;
-
-        {
-          struct heap_entry {
-            location_idx_t loc_;
-            unixtime_t arr_;
-            bool operator>(heap_entry const& o) const { return arr_ > o.arr_; }
+          auto const get_arr_1 = [&](location_idx_t l) {
+            auto const idx = cista::to_idx(l);
+            return (idx < n_locs && state.labels_[idx].ts_1_ == state.timestamp_)
+                       ? state.labels_[idx].arr_1_
+                       : kMaxTime;
           };
-          std::priority_queue<heap_entry, std::vector<heap_entry>, std::greater<>> pq;
+          auto const get_arr_2 = [&](location_idx_t l) {
+            auto const idx = cista::to_idx(l);
+            return (idx < n_locs && state.labels_[idx].ts_2_ == state.timestamp_)
+                       ? state.labels_[idx].arr_2_
+                       : kMaxTime;
+          };
 
-          for (auto const u : r2_updated_stops) {
-            pq.push({u, get_arr_2(u)});
-          }
-
-          while (!pq.empty()) {
-            auto const [w, arr] = pq.top();
-            pq.pop();
-
-            if (arr > get_arr_2(w)) continue;
-
-            auto const w_idx = cista::to_idx(w);
-            auto const route_parent = labels[w_idx].route_parent_2_;
-            if (route_parent != location_idx_t::invalid()) {
-              auto const rp_idx = cista::to_idx(route_parent);
-              auto const transfer_parent = labels[rp_idx].transfer_parent_1_;
-              if (transfer_parent != location_idx_t::invalid() && transfer_parent != route_parent) {
-                auto const arr_u = get_arr_1(transfer_parent);
-                auto const arr_y = get_arr_1(route_parent);
-                if (arr_u != kMaxTime && arr_y != kMaxTime && arr_y >= arr_u) {
-                  auto const dur_minutes =
-                      std::chrono::duration_cast<std::chrono::minutes>(arr_y - arr_u).count();
-                  auto const dur = safe_duration_cast(dur_minutes);
-                  auto const tp_idx = cista::to_idx(transfer_parent);
-                  auto it = out_shortcuts[tp_idx].find(route_parent);
-                  if (it == out_shortcuts[tp_idx].end() || dur < it->second) {
-                    out_shortcuts[tp_idx][route_parent] = dur;
+          auto const get_arr_0_resolved = [&](location_idx_t l) {
+            auto arr = get_arr_0(l);
+            if (arr != kMaxTime) return arr;
+            auto const idx = cista::to_idx(l);
+            if (idx < tt_.locations_.parents_.size()) {
+              auto const p = tt_.locations_.parents_[l];
+              if (p != location_idx_t::invalid()) return get_arr_0(p);
+            }
+            return kMaxTime;
+          };
+          auto const get_arr_1_resolved = [&](location_idx_t l) {
+            auto arr = get_arr_1(l);
+            if (arr != kMaxTime) return arr;
+            auto const idx = cista::to_idx(l);
+            if (idx < tt_.locations_.parents_.size()) {
+              auto const p = tt_.locations_.parents_[l];
+              if (p != location_idx_t::invalid()) return get_arr_1(p);
+            }
+            return kMaxTime;
+          };
+          auto const get_transfer_parent_resolved = [&](location_idx_t l) {
+            auto const idx = cista::to_idx(l);
+            if (idx < n_locs && state.labels_[idx].ts_1_ == state.timestamp_ &&
+                state.labels_[idx].transfer_parent_1_ != location_idx_t::invalid()) {
+              return state.labels_[idx].transfer_parent_1_;
+            }
+            if (idx < tt_.locations_.parents_.size()) {
+              auto const p = tt_.locations_.parents_[l];
+              if (p != location_idx_t::invalid()) {
+                auto const p_idx = cista::to_idx(p);
+                if (p_idx < n_locs && state.labels_[p_idx].ts_1_ == state.timestamp_) {
+                  return state.labels_[p_idx].transfer_parent_1_;
+                }
+              }
+            }
+            return location_idx_t::invalid();
+          };
+          auto const add_routes_for_loc = [&](location_idx_t const l, auto& routes_set) {
+            auto const l_idx = cista::to_idx(l);
+            if (l_idx < tt_.location_routes_.size()) {
+              for (auto const r : tt_.location_routes_[l]) {
+                routes_set.insert(r);
+              }
+            }
+            if (l_idx < tt_.locations_.children_.size()) {
+              for (auto const child : tt_.locations_.children_[l]) {
+                auto const c_idx = cista::to_idx(child);
+                if (c_idx < tt_.location_routes_.size()) {
+                  for (auto const r : tt_.location_routes_[child]) {
+                    routes_set.insert(r);
                   }
                 }
               }
-              labels[w_idx].route_parent_2_ = location_idx_t::invalid();
             }
+          };
 
-            if (footpaths_out != nullptr && w_idx < footpaths_out->size()) {
-              for (auto const& fp : (*footpaths_out)[w]) {
-                auto const v = fp.target();
-                auto const new_arr = arr + fp.duration();
-                if (new_arr < get_arr_2(v)) {
+          auto const& st = grouping.stations_[st_idx];
+          auto const rep = st.representative_;
+          if (rep == location_idx_t::invalid() || cista::to_idx(rep) >= n_locs) return;
+          std::cout << "DEBUG REP: " << cista::to_idx(rep) << "\n";
+
+          std::vector<duration_t> direct_dist(n_locs, duration_t::max());
+          std::vector<location_idx_t> direct_stops;
+
+          {
+            struct heap_entry {
+              location_idx_t loc_;
+              duration_t dist_;
+              bool operator>(heap_entry const& o) const { return dist_ > o.dist_; }
+            };
+            std::priority_queue<heap_entry, std::vector<heap_entry>, std::greater<>> pq;
+
+            direct_dist[cista::to_idx(rep)] = duration_t{0};
+            direct_stops.push_back(rep);
+            pq.push({rep, duration_t{0}});
+
+            while (!pq.empty()) {
+              auto const [u, d] = pq.top();
+              pq.pop();
+
+              auto const u_idx = cista::to_idx(u);
+              if (d > direct_dist[u_idx]) continue;
+
+              if (footpaths_out != nullptr && u_idx < footpaths_out->size()) {
+                for (auto const& fp : (*footpaths_out)[u]) {
+                  auto const v = fp.target();
                   auto const v_idx = cista::to_idx(v);
-                  labels[v_idx].ts_2_ = timestamp;
-                  labels[v_idx].arr_2_ = new_arr;
-                  labels[v_idx].route_parent_2_ = route_parent;
-                  pq.push({v, new_arr});
+                  if (v_idx < n_locs) {
+                    auto const new_d = safe_duration_add(d, fp.duration());
+                    if (new_d < direct_dist[v_idx]) {
+                      if (direct_dist[v_idx] == duration_t::max()) {
+                        direct_stops.push_back(v);
+                      }
+                      direct_dist[v_idx] = new_d;
+                      pq.push({v, new_d});
+                    }
+                  }
                 }
               }
             }
           }
-        }
-      }
-    }
+
+          std::set<unixtime_t> departure_times;
+
+          for (auto const u : direct_stops) {
+            auto const u_idx = cista::to_idx(u);
+            auto const walk_d = direct_dist[u_idx];
+
+            std::set<route_idx_t> direct_routes;
+            add_routes_for_loc(u, direct_routes);
+
+            for (auto const r : direct_routes) {
+              auto const stop_seq = tt_.route_location_seq_[r];
+              stop_idx_t stop_idx = 0;
+              bool found_stop = false;
+              for (std::size_t s = 0; s < stop_seq.size(); ++s) {
+                auto const loc_s = stop{stop_seq[s]}.location_idx();
+                if (loc_s == u || (cista::to_idx(loc_s) < tt_.locations_.parents_.size() &&
+                                  tt_.locations_.parents_[loc_s] == u)) {
+                  stop_idx = static_cast<stop_idx_t>(s);
+                  found_stop = true;
+                  break;
+                }
+              }
+              if (!found_stop) continue;
+
+              auto const transports = tt_.route_transport_ranges_[r];
+              for (auto t = transports.from_; t != transports.to_; ++t) {
+                auto const traffic_days = tt_.transport_traffic_days_[t];
+                auto const& bf = tt_.bitfields_[traffic_days];
+                for (std::size_t d = 0; d < bf.size(); ++d) {
+                  if (bf.test(d)) {
+                    auto const day = day_idx_t(static_cast<day_idx_t::value_t>(d));
+                    auto const dep = tt_.event_time(transport{t, day}, stop_idx, event_type::kDep);
+                    if (dep != unixtime_t::max() && dep >= unixtime_t{0_minutes} + walk_d) {
+                      departure_times.insert(dep - walk_d);
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          for (auto const dep_time : departure_times) {
+            ++state.timestamp_;
+
+            for (auto const u : direct_stops) {
+              auto const u_idx = cista::to_idx(u);
+              state.labels_[u_idx].ts_0_ = state.timestamp_;
+              state.labels_[u_idx].arr_0_ = dep_time + direct_dist[u_idx];
+            }
+
+            std::set<route_idx_t> r1_routes;
+            for (auto const u : direct_stops) {
+              if (get_arr_0_resolved(u) == kMaxTime) continue;
+              add_routes_for_loc(u, r1_routes);
+            }
+
+            std::vector<location_idx_t> r1_updated_stops;
+            for (auto const r : r1_routes) {
+              auto const stop_seq = tt_.route_location_seq_[r];
+              auto const transports = tt_.route_transport_ranges_[r];
+
+              for (std::size_t i = 0; i < stop_seq.size(); ++i) {
+                auto const board_stop = stop{stop_seq[i]}.location_idx();
+                auto const arr_0_board = get_arr_0_resolved(board_stop);
+                if (arr_0_board == kMaxTime) continue;
+
+                auto const board_stop_idx = static_cast<stop_idx_t>(i);
+
+                for (auto t = transports.from_; t != transports.to_; ++t) {
+                  auto const traffic_days = tt_.transport_traffic_days_[t];
+                  auto const& bf = tt_.bitfields_[traffic_days];
+                  for (std::size_t d = 0; d < bf.size(); ++d) {
+                    if (!bf.test(d)) continue;
+                    auto const day = day_idx_t(static_cast<day_idx_t::value_t>(d));
+                    auto const dep = tt_.event_time(transport{t, day}, board_stop_idx, event_type::kDep);
+                    if (dep >= arr_0_board) {
+                      for (std::size_t j = i + 1; j < stop_seq.size(); ++j) {
+                        auto const arr_stop = stop{stop_seq[j]}.location_idx();
+                        auto const arr_stop_idx = static_cast<stop_idx_t>(j);
+                        auto const arr_t = tt_.event_time(transport{t, day}, arr_stop_idx, event_type::kArr);
+                        if (arr_t < get_arr_1(arr_stop)) {
+                          auto const arr_idx = cista::to_idx(arr_stop);
+                          state.labels_[arr_idx].ts_1_ = state.timestamp_;
+                          state.labels_[arr_idx].arr_1_ = arr_t;
+                          state.labels_[arr_idx].transfer_parent_1_ = arr_stop;
+                          r1_updated_stops.push_back(arr_stop);
+                        }
+                      }
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+
+            if (r1_updated_stops.empty()) continue;
+
+            std::vector<location_idx_t> t1_relaxed_stops;
+            {
+              struct heap_entry {
+                location_idx_t loc_;
+                unixtime_t arr_;
+                location_idx_t parent_;
+                bool operator>(heap_entry const& o) const { return arr_ > o.arr_; }
+              };
+              std::priority_queue<heap_entry, std::vector<heap_entry>, std::greater<>> pq;
+
+              for (auto const u : r1_updated_stops) {
+                auto const arr_u = get_arr_1(u);
+                if (arr_u != kMaxTime) {
+                  pq.push({u, arr_u, u});
+                }
+              }
+
+              while (!pq.empty()) {
+                auto const [u, arr, parent] = pq.top();
+                pq.pop();
+
+                if (arr > get_arr_1(u)) continue;
+                t1_relaxed_stops.push_back(u);
+
+                auto const u_idx = cista::to_idx(u);
+                if (footpaths_out != nullptr && u_idx < footpaths_out->size()) {
+                  auto const parent_arr = get_arr_1(parent);
+                  for (auto const& fp : (*footpaths_out)[u]) {
+                    auto const v = fp.target();
+                    auto const new_arr = arr + fp.duration();
+                    if (parent_arr != kMaxTime && new_arr >= parent_arr &&
+                        (new_arr - parent_arr) <= limit_dur) {
+                      if (new_arr < get_arr_1(v)) {
+                        auto const v_idx = cista::to_idx(v);
+                        state.labels_[v_idx].ts_1_ = state.timestamp_;
+                        state.labels_[v_idx].arr_1_ = new_arr;
+                        state.labels_[v_idx].transfer_parent_1_ = parent;
+                        pq.push({v, new_arr, parent});
+                      }
+                    }
+                  }
+                }
+              }
+            }
+
+            if (t1_relaxed_stops.empty()) continue;
+
+            std::set<route_idx_t> r2_routes;
+            for (auto const u : t1_relaxed_stops) {
+              add_routes_for_loc(u, r2_routes);
+            }
+
+            std::vector<location_idx_t> r2_updated_stops;
+            for (auto const r : r2_routes) {
+              auto const stop_seq = tt_.route_location_seq_[r];
+              auto const transports = tt_.route_transport_ranges_[r];
+
+              for (std::size_t i = 0; i < stop_seq.size(); ++i) {
+                auto const board_stop = stop{stop_seq[i]}.location_idx();
+                auto const arr_1_board = get_arr_1_resolved(board_stop);
+                if (arr_1_board == kMaxTime) continue;
+
+                auto const board_stop_idx = static_cast<stop_idx_t>(i);
+
+                for (auto t = transports.from_; t != transports.to_; ++t) {
+                  auto const traffic_days = tt_.transport_traffic_days_[t];
+                  auto const& bf = tt_.bitfields_[traffic_days];
+                  for (std::size_t d = 0; d < bf.size(); ++d) {
+                    if (!bf.test(d)) continue;
+                    auto const day = day_idx_t(static_cast<day_idx_t::value_t>(d));
+                    auto const dep = tt_.event_time(transport{t, day}, board_stop_idx, event_type::kDep);
+                    if (dep >= arr_1_board) {
+                      auto const transfer_parent = get_transfer_parent_resolved(board_stop);
+
+                      for (std::size_t j = i + 1; j < stop_seq.size(); ++j) {
+                        auto const arr_stop = stop{stop_seq[j]}.location_idx();
+                        auto const arr_stop_idx = static_cast<stop_idx_t>(j);
+                        auto const arr_t = tt_.event_time(transport{t, day}, arr_stop_idx, event_type::kArr);
+                        if (arr_t < get_arr_2(arr_stop)) {
+                          auto const arr_idx = cista::to_idx(arr_stop);
+                          state.labels_[arr_idx].ts_2_ = state.timestamp_;
+                          state.labels_[arr_idx].arr_2_ = arr_t;
+                          if (transfer_parent != location_idx_t::invalid() && transfer_parent != board_stop) {
+                            state.labels_[arr_idx].route_parent_2_ = board_stop;
+                          } else {
+                            state.labels_[arr_idx].route_parent_2_ = location_idx_t::invalid();
+                          }
+                          r2_updated_stops.push_back(arr_stop);
+                        }
+                      }
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+
+            if (r2_updated_stops.empty()) continue;
+
+            {
+              struct heap_entry {
+                location_idx_t loc_;
+                unixtime_t arr_;
+                bool operator>(heap_entry const& o) const { return arr_ > o.arr_; }
+              };
+              std::priority_queue<heap_entry, std::vector<heap_entry>, std::greater<>> pq;
+
+              for (auto const u : r2_updated_stops) {
+                pq.push({u, get_arr_2(u)});
+              }
+
+              while (!pq.empty()) {
+                auto const [w, arr] = pq.top();
+                pq.pop();
+
+                if (arr > get_arr_2(w)) continue;
+
+                auto const w_idx = cista::to_idx(w);
+                auto const route_parent = state.labels_[w_idx].route_parent_2_;
+                if (route_parent != location_idx_t::invalid()) {
+                  auto const rp_idx = cista::to_idx(route_parent);
+                  auto const transfer_parent = state.labels_[rp_idx].transfer_parent_1_;
+                  if (transfer_parent != location_idx_t::invalid() && transfer_parent != route_parent) {
+                    auto const arr_u = get_arr_1(transfer_parent);
+                    auto const arr_y = get_arr_1(route_parent);
+                    if (arr_u != kMaxTime && arr_y != kMaxTime && arr_y >= arr_u) {
+                      auto const dur_minutes =
+                          std::chrono::duration_cast<std::chrono::minutes>(arr_y - arr_u).count();
+                      auto const dur = safe_duration_cast(dur_minutes);
+                      auto const tp_idx = cista::to_idx(transfer_parent);
+                      {
+                        std::lock_guard lock{shortcut_mutex};
+                        auto it = out_shortcuts[tp_idx].find(route_parent);
+                        if (it == out_shortcuts[tp_idx].end() || dur < it->second) {
+                          std::cout << "DEBUG WITNESS SHORTCUT EMITTED: tp_idx=" << tp_idx
+                                    << " -> route_parent=" << cista::to_idx(route_parent)
+                                    << " dur=" << dur.count() << "m\n";
+                          out_shortcuts[tp_idx][route_parent] = dur;
+                        }
+                      }
+                    }
+                  }
+                }
+
+                if (footpaths_out != nullptr && w_idx < footpaths_out->size()) {
+                  for (auto const& fp : (*footpaths_out)[w]) {
+                    auto const v = fp.target();
+                    auto const new_arr = arr + fp.duration();
+                    if (new_arr < get_arr_2(v)) {
+                      auto const v_idx = cista::to_idx(v);
+                      state.labels_[v_idx].ts_2_ = state.timestamp_;
+                      state.labels_[v_idx].arr_2_ = new_arr;
+                      state.labels_[v_idx].route_parent_2_ = route_parent;
+                      pq.push({v, new_arr});
+                    }
+                  }
+                }
+              }
+            }
+          }
+        });
   }
 };
 

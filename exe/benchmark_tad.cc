@@ -2,6 +2,9 @@
 #include <filesystem>
 #include <iostream>
 #include <regex>
+#ifndef _WIN32
+#include <sys/resource.h>
+#endif
 
 #include "boost/program_options.hpp"
 
@@ -14,13 +17,10 @@
 #include "nigiri/routing/tad/tad_route.h"
 #include "nigiri/routing/tad/tad_search.h"
 #include "nigiri/routing/tad/tad_state.h"
+#include "nigiri/routing/tad/tad_ultra_builder.h"
 #include "nigiri/routing/search.h"
 #include "nigiri/timetable.h"
 #include "nigiri/types.h"
-
-#ifndef _WIN32
-#include <sys/resource.h>
-#endif
 
 using namespace nigiri;
 using namespace nigiri::routing;
@@ -112,7 +112,8 @@ void generate_queries(
 void process_queries(
     std::vector<nigiri::query_generation::start_dest_query> const& queries,
     std::vector<benchmark_result>& results,
-    nigiri::timetable const& tt) {
+    nigiri::timetable const& tt,
+    nigiri::routing::tad_transfer_index const* transfer_index) {
   results.reserve(queries.size());
   std::mutex mutex;
   {
@@ -130,7 +131,7 @@ void process_queries(
             auto const total_time_start = std::chrono::steady_clock::now();
             auto const result = routing::tad_route(
                 tt, nullptr, query_state.ss_, query_state.ts_, queries[q_idx].q_,
-                direction::kForward);
+                direction::kForward, std::nullopt, transfer_index);
             auto const total_time_stop = std::chrono::steady_clock::now();
             auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(total_time_stop - total_time_start);
             auto const stats = routing::tad_stats{
@@ -239,6 +240,8 @@ int main(int argc, char* argv[]) {
   auto seed = std::int64_t{-1};
   auto min_transfer_time = duration_t::rep{};
   auto qa_path = std::filesystem::path{};
+  auto transfer_mode_str = std::string{"base"};
+  auto witness_limit = int{15};
 
   bpo::options_description desc("Allowed options");
   desc.add_options()("help,h", "produce this help message")  //
@@ -247,6 +250,12 @@ int main(int argc, char* argv[]) {
       ("seed,s", bpo::value<std::int64_t>(&seed),
        "value to seed the RNG of the query generator with, "
        "omit for random seed")  //
+      ("transfer_mode",
+       bpo::value<std::string>(&transfer_mode_str)->default_value("base"),
+       "transfer provider mode: base | ultra")  //
+      ("witness_limit",
+       bpo::value<int>(&witness_limit)->default_value(15),
+       "ULTRA witness transfer limit in minutes")  //
       ("num_queries,n", bpo::value(&n_queries)->default_value(n_queries),
        "number of queries to generate/process")(
           "interval_size,i",
@@ -425,11 +434,24 @@ int main(int argc, char* argv[]) {
   }
   // process program options - end
 
+  std::optional<routing::tad_transfer_index> ultra_idx;
+  if (transfer_mode_str == "ultra") {
+    std::cout << "building ULTRA transfer index (witness limit = " << witness_limit << " min)...\n";
+    auto const build_start = std::chrono::steady_clock::now();
+    ultra_idx = routing::build_tad_ultra_index(tt, witness_limit);
+    auto const build_dur = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - build_start);
+    std::cout << "ULTRA transfer index built in " << build_dur.count() << " ms\n";
+  } else if (transfer_mode_str != "base") {
+    std::cout << "Error: Invalid transfer_mode '" << transfer_mode_str << "' (expected 'base' or 'ultra')\n";
+    return 1;
+  }
+
   auto queries = std::vector<nigiri::query_generation::start_dest_query>{};
   generate_queries(queries, n_queries, tt, gs, seed);
 
   auto results = std::vector<benchmark_result>{};
-  process_queries(queries, results, tt);
+  process_queries(queries, results, tt, ultra_idx ? &(*ultra_idx) : nullptr);
 
   print_results(queries, results, tt, gs, tt_path);
 
