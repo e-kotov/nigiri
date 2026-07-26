@@ -61,9 +61,17 @@ struct tad_transfer_index {
     fnv_combine(static_cast<std::uint64_t>(tt.transport_traffic_days_.size()));
     fnv_combine(static_cast<std::uint64_t>(tt.locations_.parents_.size()));
     fnv_combine(static_cast<std::uint64_t>(tt.locations_.equivalences_.size()));
+    fnv_combine(static_cast<std::uint64_t>(tt.locations_.children_.size()));
+    fnv_combine(static_cast<std::uint64_t>(tt.location_routes_.size()));
     fnv_combine(static_cast<std::uint64_t>(tt.bitfields_.size()));
     fnv_combine(static_cast<std::uint64_t>(tt.route_stop_times_.size()));
     fnv_combine(static_cast<std::uint64_t>(tt.transport_route_.size()));
+    fnv_combine(static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::minutes>(
+            tt.date_range_.from_.time_since_epoch()).count()));
+    fnv_combine(static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::minutes>(
+            tt.date_range_.to_.time_since_epoch()).count()));
 
     // Hash all parent relationships
     for (auto const p : tt.locations_.parents_) {
@@ -75,6 +83,22 @@ struct tad_transfer_index {
       fnv_combine(static_cast<std::uint64_t>(eq.size()));
       for (auto const loc : eq) {
         fnv_combine(static_cast<std::uint64_t>(cista::to_idx(loc)));
+      }
+    }
+
+    // Hash all location children relationships
+    for (auto const& children : tt.locations_.children_) {
+      fnv_combine(static_cast<std::uint64_t>(children.size()));
+      for (auto const child : children) {
+        fnv_combine(static_cast<std::uint64_t>(cista::to_idx(child)));
+      }
+    }
+
+    // Hash location_routes_
+    for (auto const& routes : tt.location_routes_) {
+      fnv_combine(static_cast<std::uint64_t>(routes.size()));
+      for (auto const r : routes) {
+        fnv_combine(static_cast<std::uint64_t>(cista::to_idx(r)));
       }
     }
 
@@ -154,11 +178,36 @@ struct tad_transfer_index {
     return fp;
   }
 
-  bool is_valid_for(profile_idx_t const prf_idx) const {
+  bool is_valid_for_tt(timetable const& tt) const {
+    auto const expected_tt_fp = compute_tt_fingerprint(tt);
+    auto const expected_n_locs = tt.locations_.parents_.empty()
+                                     ? tt.n_locations()
+                                     : static_cast<std::uint32_t>(tt.locations_.parents_.size());
+
+    return version_ == kVersion &&
+           n_locations_ == expected_n_locs &&
+           timetable_n_routes_ == static_cast<std::uint64_t>(tt.route_location_seq_.size()) &&
+           timetable_n_transports_ == static_cast<std::uint64_t>(tt.transport_traffic_days_.size()) &&
+           timetable_fingerprint_ == expected_tt_fp;
+  }
+
+  bool is_valid_for(profile_idx_t const prf_idx,
+                    transfer_time_settings const& tts = {}) const {
+    return is_valid_for(prf_idx, static_cast<int>(witness_limit_minutes_), tts);
+  }
+
+  bool is_valid_for(profile_idx_t const prf_idx,
+                    int const witness_limit,
+                    transfer_time_settings const& tts = {}) const {
+    auto const normalized_witness_limit =
+        witness_limit < 0 ? 0U : static_cast<std::uint32_t>(witness_limit);
     auto const p_idx = cista::to_idx(prf_idx);
+
     return version_ == kVersion && p_idx < profiles_.size() &&
            profiles_[p_idx].has_offsets_for(n_locations_) &&
-           !profiles_[p_idx].transfer_time_fingerprint_.empty();
+           !profiles_[p_idx].transfer_time_fingerprint_.empty() &&
+           witness_limit_minutes_ == normalized_witness_limit &&
+           tts.is_default();
   }
 
   bool is_valid_for(timetable const& tt,
@@ -171,21 +220,7 @@ struct tad_transfer_index {
                     profile_idx_t const prf_idx,
                     int const witness_limit,
                     transfer_time_settings const& tts = {}) const {
-    auto const normalized_witness_limit =
-        witness_limit < 0 ? 0U : static_cast<std::uint32_t>(witness_limit);
-    if (!is_valid_for(prf_idx)) return false;
-
-    auto const expected_tt_fp = compute_tt_fingerprint(tt);
-    auto const expected_n_locs = tt.locations_.parents_.empty()
-                                     ? tt.n_locations()
-                                     : static_cast<std::uint32_t>(tt.locations_.parents_.size());
-
-    return n_locations_ == expected_n_locs &&
-           witness_limit_minutes_ == normalized_witness_limit &&
-           timetable_n_routes_ == static_cast<std::uint64_t>(tt.route_location_seq_.size()) &&
-           timetable_n_transports_ == static_cast<std::uint64_t>(tt.transport_traffic_days_.size()) &&
-           timetable_fingerprint_ == expected_tt_fp &&
-           tts.is_default();
+    return is_valid_for(prf_idx, witness_limit, tts) && is_valid_for_tt(tt);
   }
 
   bool write(std::filesystem::path const& path) const {

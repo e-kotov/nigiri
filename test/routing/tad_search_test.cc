@@ -1613,6 +1613,70 @@ TEST(routing, tad_ultra_index_binary_serialization_and_validation) {
   std::filesystem::remove(tmp_path);
 }
 
+TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+  finalize(tt);
+
+  auto const idx = routing::build_tad_ultra_index(tt, 15);
+  EXPECT_TRUE(idx.is_valid_for(tt, profile_idx_t{0}, 15));
+
+  // 1. Mutate route_stop_times_
+  {
+    timetable tt_mut = tt;
+    if (!tt_mut.route_stop_times_.empty()) {
+      tt_mut.route_stop_times_[0] = tt_mut.route_stop_times_[0] + duration_t{5};
+      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
+    }
+  }
+
+  // 2. Mutate footpaths_in_
+  {
+    timetable tt_mut = tt;
+    if (!tt_mut.locations_.footpaths_in_.empty() && !tt_mut.locations_.footpaths_in_[0].empty()) {
+      tt_mut.locations_.footpaths_in_[0][0].push_back(
+          footpath{location_idx_t{0}, duration_t{10}});
+      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
+    }
+  }
+
+  // 3. Mutate transport_route_
+  {
+    timetable tt_mut = tt;
+    if (!tt_mut.transport_route_.empty()) {
+      tt_mut.transport_route_[0] = route_idx_t{999};
+      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
+    }
+  }
+
+  // 4. Mutate date_range_
+  {
+    timetable tt_mut = tt;
+    tt_mut.date_range_.from_ += date::days{1};
+    EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
+  }
+
+  // 5. Mutate location_routes_
+  {
+    timetable tt_mut = tt;
+    if (!tt_mut.location_routes_.empty()) {
+      tt_mut.location_routes_[0].push_back(route_idx_t{999});
+      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
+    }
+  }
+
+  // 6. Mutate children_
+  {
+    timetable tt_mut = tt;
+    if (!tt_mut.locations_.children_.empty()) {
+      tt_mut.locations_.children_[0].push_back(location_idx_t{999});
+      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
+    }
+  }
+}
+
 
 
 
