@@ -1117,15 +1117,14 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   auto const b_start = ultra_idx_15.profiles_[0].out_offsets_[b_idx];
   auto const b_end = ultra_idx_15.profiles_[0].out_offsets_[b_idx + 1];
 
-  // Prove that B -> X (3 min) base footpath exists.
+  // Prove that B -> X (3 min) intermediate footpath between distinct stations is PRUNED (not seeded unconditionally).
   bool found_b_to_x = false;
   for (auto i = b_start; i < b_end; ++i) {
     if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_x) {
       found_b_to_x = true;
-      EXPECT_EQ(3_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
     }
   }
-  EXPECT_TRUE(found_b_to_x);
+  EXPECT_FALSE(found_b_to_x);
 
   // Prove that run_witness_search() emitted the NEW SHORTCUT edge B -> C (7 min),
   // which was NOT a direct base footpath in tt!
@@ -1153,7 +1152,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   }
   EXPECT_TRUE(found_c_in_b);
 
-  // Verify long base footpath A -> D (120 min) is preserved without dropping.
+  // Verify un-contracted base footpath A -> D (120 min) is pruned.
   auto const a_idx = cista::to_idx(loc_a);
   auto const a_start = ultra_idx_15.profiles_[0].out_offsets_[a_idx];
   auto const a_end = ultra_idx_15.profiles_[0].out_offsets_[a_idx + 1];
@@ -1161,16 +1160,15 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   for (auto i = a_start; i < a_end; ++i) {
     if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_d) {
       found_long_a_to_d = true;
-      EXPECT_EQ(120_minutes, ultra_idx_15.profiles_[0].out_edges_[i].duration_);
     }
   }
-  EXPECT_TRUE(found_long_a_to_d);
+  EXPECT_FALSE(found_long_a_to_d);
 
   // 2. Build index with witness transfer limit = 5 minutes (< 7 min multi-hop walk).
   auto const ultra_idx_5 = routing::build_tad_ultra_index(tt, 5);
   ASSERT_TRUE(ultra_idx_5.is_valid_for(profile_idx_t{0}));
 
-  // Verify base footpath B -> X (3 min) is present.
+  // Verify intermediate footpath B -> X (3 min) is pruned.
   auto const b_start_5 = ultra_idx_5.profiles_[0].out_offsets_[b_idx];
   auto const b_end_5 = ultra_idx_5.profiles_[0].out_offsets_[b_idx + 1];
   bool found_b_to_x_5 = false;
@@ -1183,9 +1181,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
       found_emitted_b_to_c_5 = true;
     }
   }
-  EXPECT_TRUE(found_b_to_x_5);
-  // Prove that witness_transfer_limit_minutes = 5 PRUNED the witness search relaxation from X to C,
-  // so NO shortcut B -> C was emitted!
+  EXPECT_FALSE(found_b_to_x_5);
   EXPECT_FALSE(found_emitted_b_to_c_5);
 
   // 3. Scalar search parity for query A -> D requiring the intermediate transfer.
