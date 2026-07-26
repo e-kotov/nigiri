@@ -12,8 +12,8 @@ struct transfer_time_settings {
   }
 
   bool is_default() const {
-    return default_ || (min_transfer_time_ == duration_t{0} &&
-                        additional_time_ == duration_t{0} && factor_ == 1.0F);
+    return default_ && min_transfer_time_ == duration_t{0} &&
+           additional_time_ == duration_t{0} && factor_ == 1.0F;
   }
 
   bool default_{true};
