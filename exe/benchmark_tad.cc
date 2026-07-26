@@ -461,12 +461,24 @@ int main(int argc, char* argv[]) {
       std::cout << "ULTRA transfer index built in " << build_dur.count() << " ms\n";
       if (!ultra_index_path.empty()) {
         std::cout << "saving ULTRA transfer index to " << ultra_index_path << "...\n";
-        ultra_idx->write(ultra_index_path);
+        if (!ultra_idx->write(ultra_index_path)) {
+          std::cout << "Error: failed to write ULTRA transfer index to "
+                    << ultra_index_path << "\n";
+          return 1;
+        }
       }
     }
   } else if (transfer_mode_str != "base") {
     std::cout << "Error: Invalid transfer_mode '" << transfer_mode_str << "' (expected 'base' or 'ultra')\n";
     return 1;
+  }
+
+  if (transfer_mode_str == "ultra") {
+    if (!gs.transfer_time_settings_.default_) {
+      std::cout << "WARNING: ULTRA transfer index requested, but non-default transfer_time_settings "
+                << "(--min_transfer_time / --transfer_time_factor) were specified! "
+                << "Search will fall back to footpath_transfer_provider.\n";
+    }
   }
 
   auto queries = std::vector<nigiri::query_generation::start_dest_query>{};

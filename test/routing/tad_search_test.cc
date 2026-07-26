@@ -1133,12 +1133,9 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   for (auto i = b_start; i < b_end; ++i) {
     auto const target = ultra_idx_15.profiles_[0].out_edges_[i].target_;
     auto const dur = ultra_idx_15.profiles_[0].out_edges_[i].duration_;
-    std::cout << "DEBUG loc_b out_edge[" << i << "]: target=" << cista::to_idx(target)
-              << " (loc_c=" << cista::to_idx(loc_c) << ", loc_x=" << cista::to_idx(loc_x)
-              << ") dur=" << dur.count() << "m\n";
     if (target == loc_c) {
       found_emitted_b_to_c = true;
-      EXPECT_GE(dur, 1_minutes);
+      EXPECT_EQ(7_minutes, dur);
     }
   }
   EXPECT_TRUE(found_emitted_b_to_c);
@@ -1151,7 +1148,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   for (auto i = c_in_start; i < c_in_end; ++i) {
     if (ultra_idx_15.profiles_[0].in_edges_[i].target_ == loc_b) {
       found_c_in_b = true;
-      EXPECT_GE(ultra_idx_15.profiles_[0].in_edges_[i].duration_, 1_minutes);
+      EXPECT_EQ(7_minutes, ultra_idx_15.profiles_[0].in_edges_[i].duration_);
     }
   }
   EXPECT_TRUE(found_c_in_b);
@@ -1471,7 +1468,7 @@ TEST(routing, tad_egress_shortcut_integration) {
   EXPECT_EQ(3U, res_invalid.journeys_->begin()->legs_.size());
 }
 
-TEST(routing, tad_ultra_witness_transfer_shortcut) {
+TEST(routing, tad_ultra_direct_transfer_edge_routing) {
   constexpr auto const services = R"(
 *Z 00001 80____       048 030                             %
 *A VE 0000001 0000002 000005                              %
@@ -1507,7 +1504,17 @@ TEST(routing, tad_ultra_witness_transfer_shortcut) {
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
   ASSERT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
 
-  // Verify that witness search generated an ULTRA transfer shortcut B -> C with 5 minute duration
+  // Verify that the ULTRA index preserves the direct transfer edge B -> C
+  // using the duration produced by the HRD fixture loader.
+  auto expected_direct_transfer = duration_t::max();
+  for (auto const& fp : tt.locations_.footpaths_out_[0][loc_b]) {
+    if (fp.target() == loc_c && fp.duration() < expected_direct_transfer) {
+      expected_direct_transfer = fp.duration();
+    }
+  }
+  ASSERT_NE(duration_t::max(), expected_direct_transfer)
+      << "Fixture is missing direct transfer edge B -> C";
+
   auto const b_idx = cista::to_idx(loc_b);
   auto const& ps = ultra_idx.profiles_[cista::to_idx(profile_idx_t{0})];
   auto const start_off = ps.out_offsets_[b_idx];
@@ -1517,12 +1524,12 @@ TEST(routing, tad_ultra_witness_transfer_shortcut) {
   for (auto i = start_off; i < end_off; ++i) {
     if (ps.out_edges_[i].target_ == loc_c) {
       found_shortcut_bc = true;
-      EXPECT_GT(ps.out_edges_[i].duration_, 0_minutes);
+      EXPECT_EQ(expected_direct_transfer, ps.out_edges_[i].duration_);
     }
   }
-  EXPECT_TRUE(found_shortcut_bc) << "Witness search failed to discover transfer shortcut B -> C";
+  EXPECT_TRUE(found_shortcut_bc) << "ULTRA index is missing transfer edge B -> C";
 
-  // Verify routing A -> D via ULTRA transfer shortcut
+  // Verify routing A -> D via the indexed transfer edge
   auto const loc_a = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const loc_d = tt.locations_.location_id_to_idx_.at({"0000004", src});
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
@@ -1545,13 +1552,62 @@ TEST(routing, tad_ultra_witness_transfer_shortcut) {
   // Leg 0: A -> B train (02:00 -> 02:20)
   EXPECT_EQ(loc_a, j.legs_[0].from_);
   EXPECT_EQ(loc_b, j.legs_[0].to_);
-  // Leg 1: B -> C transfer shortcut
+  // Leg 1: B -> C indexed transfer edge
   EXPECT_EQ(loc_b, j.legs_[1].from_);
   EXPECT_EQ(loc_c, j.legs_[1].to_);
-  EXPECT_GT(j.legs_[1].arr_time_ - j.legs_[1].dep_time_, 0_minutes);
+  EXPECT_EQ(expected_direct_transfer,
+            j.legs_[1].arr_time_ - j.legs_[1].dep_time_);
   // Leg 2: C -> D train (02:30 -> 02:50)
   EXPECT_EQ(loc_c, j.legs_[2].from_);
   EXPECT_EQ(loc_d, j.legs_[2].to_);
+}
+
+TEST(routing, tad_ultra_index_binary_serialization_and_validation) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+  finalize(tt);
+
+  auto const idx = routing::build_tad_ultra_index(tt, 15);
+  EXPECT_TRUE(idx.is_valid_for(tt, profile_idx_t{0}, 15));
+
+  auto const tmp_path = std::filesystem::temp_directory_path() / "test_ultra_index.bin";
+  std::filesystem::remove(tmp_path);
+
+  // 1. Roundtrip serialization test
+  ASSERT_TRUE(idx.write(tmp_path));
+  auto const read_idx = routing::tad_transfer_index::read(tmp_path);
+  ASSERT_TRUE(read_idx.has_value());
+  EXPECT_TRUE(read_idx->is_valid_for(tt, profile_idx_t{0}, 15));
+  EXPECT_EQ(idx.version_, read_idx->version_);
+  EXPECT_EQ(idx.n_locations_, read_idx->n_locations_);
+  EXPECT_EQ(idx.witness_limit_minutes_, read_idx->witness_limit_minutes_);
+  EXPECT_EQ(idx.timetable_n_routes_, read_idx->timetable_n_routes_);
+  EXPECT_EQ(idx.timetable_n_transports_, read_idx->timetable_n_transports_);
+  EXPECT_EQ(idx.timetable_fingerprint_, read_idx->timetable_fingerprint_);
+  EXPECT_EQ(idx.profiles_[0].transfer_time_fingerprint_, read_idx->profiles_[0].transfer_time_fingerprint_);
+
+  // 2. Reject non-default transfer_time_settings
+  routing::transfer_time_settings non_default_tts;
+  non_default_tts.default_ = false;
+  EXPECT_FALSE(read_idx->is_valid_for(tt, profile_idx_t{0}, 15, non_default_tts));
+
+  // 3. Reject mismatched witness limit
+  EXPECT_FALSE(read_idx->is_valid_for(tt, profile_idx_t{0}, 30));
+
+  // 4. Reject truncated/corrupted file
+  auto const file_sz = std::filesystem::file_size(tmp_path);
+  std::ofstream truncate_out{tmp_path, std::ios::binary | std::ios::in | std::ios::out};
+  truncate_out.seekp(file_sz - 10);
+  truncate_out.write("CORRUPT!", 8);
+  truncate_out.close();
+
+  std::filesystem::resize_file(tmp_path, file_sz - 5);
+  auto const corrupt_read = routing::tad_transfer_index::read(tmp_path);
+  EXPECT_FALSE(corrupt_read.has_value());
+
+  std::filesystem::remove(tmp_path);
 }
 
 

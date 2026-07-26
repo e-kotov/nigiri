@@ -1,6 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <optional>
+#include <system_error>
 
 #include "nigiri/routing/tad/tad_transfer_provider.h"
 #include "nigiri/types.h"
@@ -35,49 +39,72 @@ struct tad_profile_shortcuts {
   }
 };
 
-#include <filesystem>
-#include <fstream>
-#include <iostream>
-#include <optional>
-
 struct tad_transfer_index {
-  static constexpr std::uint32_t kVersion = 2U;
+  static constexpr std::uint32_t kVersion = 3U;
 
   std::uint32_t version_{kVersion};
   std::uint32_t n_locations_{0U};
   std::uint32_t witness_limit_minutes_{0U};
   std::uint64_t timetable_n_routes_{0U};
   std::uint64_t timetable_n_transports_{0U};
+  std::uint64_t timetable_fingerprint_{0U};
   vector<tad_profile_shortcuts> profiles_;
+
+  static std::uint64_t compute_tt_fingerprint(timetable const& tt) {
+    std::uint64_t fp = tt.n_locations();
+    fp = (fp * 31) + tt.route_location_seq_.size();
+    fp = (fp * 31) + tt.transport_traffic_days_.size();
+    if (!tt.locations_.parents_.empty()) {
+      fp = (fp * 31) + tt.locations_.parents_.size();
+    }
+    return fp;
+  }
 
   bool is_valid_for(profile_idx_t const prf_idx) const {
     auto const p_idx = cista::to_idx(prf_idx);
     return version_ == kVersion && p_idx < profiles_.size() &&
-           profiles_[p_idx].has_offsets_for(n_locations_);
+           profiles_[p_idx].has_offsets_for(n_locations_) &&
+           !profiles_[p_idx].transfer_time_fingerprint_.empty();
   }
 
-  bool is_valid_for(timetable const& tt, profile_idx_t const prf_idx, int const witness_limit) const {
-    return is_valid_for(prf_idx) &&
-           n_locations_ == static_cast<std::uint32_t>(tt.locations_.parents_.size()) &&
-           witness_limit_minutes_ == static_cast<std::uint32_t>(witness_limit) &&
+  bool is_valid_for(timetable const& tt,
+                    profile_idx_t const prf_idx,
+                    int const witness_limit,
+                    transfer_time_settings const& tts = {}) const {
+    auto const normalized_witness_limit =
+        witness_limit < 0 ? 0U : static_cast<std::uint32_t>(witness_limit);
+    if (!is_valid_for(prf_idx)) return false;
+
+    auto const expected_tt_fp = compute_tt_fingerprint(tt);
+
+    return n_locations_ == static_cast<std::uint32_t>(tt.locations_.parents_.size()) &&
+           witness_limit_minutes_ == normalized_witness_limit &&
            timetable_n_routes_ == static_cast<std::uint64_t>(tt.route_location_seq_.size()) &&
-           timetable_n_transports_ == static_cast<std::uint64_t>(tt.transport_traffic_days_.size());
+           timetable_n_transports_ == static_cast<std::uint64_t>(tt.transport_traffic_days_.size()) &&
+           timetable_fingerprint_ == expected_tt_fp &&
+           tts.default_;
   }
 
-  void write(std::filesystem::path const& path) const {
+  bool write(std::filesystem::path const& path) const {
     std::ofstream out{path, std::ios::binary};
-    if (!out.is_open()) return;
+    if (!out.is_open()) return false;
 
     out.write(reinterpret_cast<char const*>(&version_), sizeof(version_));
     out.write(reinterpret_cast<char const*>(&n_locations_), sizeof(n_locations_));
     out.write(reinterpret_cast<char const*>(&witness_limit_minutes_), sizeof(witness_limit_minutes_));
     out.write(reinterpret_cast<char const*>(&timetable_n_routes_), sizeof(timetable_n_routes_));
     out.write(reinterpret_cast<char const*>(&timetable_n_transports_), sizeof(timetable_n_transports_));
+    out.write(reinterpret_cast<char const*>(&timetable_fingerprint_), sizeof(timetable_fingerprint_));
 
     auto const n_profiles = static_cast<std::uint32_t>(profiles_.size());
     out.write(reinterpret_cast<char const*>(&n_profiles), sizeof(n_profiles));
 
     for (auto const& prof : profiles_) {
+      auto write_str = [&](string const& str) {
+        std::uint64_t sz = str.size();
+        out.write(reinterpret_cast<char const*>(&sz), sizeof(sz));
+        if (sz > 0) out.write(str.data(), sz);
+      };
       auto write_vec_u32 = [&](vector<std::uint32_t> const& vec) {
         std::uint64_t sz = vec.size();
         out.write(reinterpret_cast<char const*>(&sz), sizeof(sz));
@@ -89,16 +116,26 @@ struct tad_transfer_index {
         if (sz > 0) out.write(reinterpret_cast<char const*>(vec.data()), sz * sizeof(tad_transfer_edge));
       };
 
+      write_str(prof.transfer_time_fingerprint_);
       write_vec_u32(prof.out_offsets_);
       write_vec_edges(prof.out_edges_);
       write_vec_u32(prof.in_offsets_);
       write_vec_edges(prof.in_edges_);
     }
+    out.close();
+    return static_cast<bool>(out);
   }
 
   static std::optional<tad_transfer_index> read(std::filesystem::path const& path) {
     std::ifstream in{path, std::ios::binary};
     if (!in.is_open()) return std::nullopt;
+
+    std::error_code ec;
+    auto const file_size = std::filesystem::file_size(path, ec);
+    if (ec || file_size < 36U) return std::nullopt;
+
+    auto const max_u32_entries = file_size / sizeof(std::uint32_t);
+    auto const max_edge_entries = file_size / sizeof(tad_transfer_edge);
 
     tad_transfer_index idx;
     in.read(reinterpret_cast<char*>(&idx.version_), sizeof(idx.version_));
@@ -108,6 +145,7 @@ struct tad_transfer_index {
     in.read(reinterpret_cast<char*>(&idx.witness_limit_minutes_), sizeof(idx.witness_limit_minutes_));
     in.read(reinterpret_cast<char*>(&idx.timetable_n_routes_), sizeof(idx.timetable_n_routes_));
     in.read(reinterpret_cast<char*>(&idx.timetable_n_transports_), sizeof(idx.timetable_n_transports_));
+    in.read(reinterpret_cast<char*>(&idx.timetable_fingerprint_), sizeof(idx.timetable_fingerprint_));
 
     std::uint32_t n_profiles{0};
     in.read(reinterpret_cast<char*>(&n_profiles), sizeof(n_profiles));
@@ -115,10 +153,19 @@ struct tad_transfer_index {
 
     idx.profiles_.resize(n_profiles);
     for (std::uint32_t p = 0; p < n_profiles; ++p) {
+      auto read_str = [&](string& str) -> bool {
+        std::uint64_t sz{0};
+        in.read(reinterpret_cast<char*>(&sz), sizeof(sz));
+        if (!in || sz > file_size) return false;
+        std::string tmp(sz, '\0');
+        if (sz > 0) in.read(tmp.data(), sz);
+        str = tmp.c_str();
+        return static_cast<bool>(in);
+      };
       auto read_vec_u32 = [&](vector<std::uint32_t>& vec) -> bool {
         std::uint64_t sz{0};
         in.read(reinterpret_cast<char*>(&sz), sizeof(sz));
-        if (!in) return false;
+        if (!in || sz > max_u32_entries) return false;
         vec.resize(sz);
         if (sz > 0) in.read(reinterpret_cast<char*>(vec.data()), sz * sizeof(std::uint32_t));
         return static_cast<bool>(in);
@@ -126,18 +173,23 @@ struct tad_transfer_index {
       auto read_vec_edges = [&](vector<tad_transfer_edge>& vec) -> bool {
         std::uint64_t sz{0};
         in.read(reinterpret_cast<char*>(&sz), sizeof(sz));
-        if (!in) return false;
+        if (!in || sz > max_edge_entries) return false;
         vec.resize(sz);
         if (sz > 0) in.read(reinterpret_cast<char*>(vec.data()), sz * sizeof(tad_transfer_edge));
         return static_cast<bool>(in);
       };
 
-      if (!read_vec_u32(idx.profiles_[p].out_offsets_) ||
+      if (!read_str(idx.profiles_[p].transfer_time_fingerprint_) ||
+          !read_vec_u32(idx.profiles_[p].out_offsets_) ||
           !read_vec_edges(idx.profiles_[p].out_edges_) ||
           !read_vec_u32(idx.profiles_[p].in_offsets_) ||
           !read_vec_edges(idx.profiles_[p].in_edges_)) {
         return std::nullopt;
       }
+    }
+
+    if (in.peek() != std::ifstream::traits_type::eof()) {
+      return std::nullopt;
     }
     return idx;
   }
@@ -148,6 +200,8 @@ struct shortcut_transfer_provider : public tad_transfer_provider {
 
   explicit shortcut_transfer_provider(tad_profile_shortcuts const& shortcuts)
       : shortcuts_{shortcuts} {}
+
+  char const* name() const override { return "shortcut_transfer_provider"; }
 
   void stop_transfers(location_idx_t const l,
                       bool const fwd,

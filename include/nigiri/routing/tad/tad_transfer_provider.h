@@ -15,6 +15,8 @@ struct tad_transfer_edge {
 struct tad_transfer_provider {
   virtual ~tad_transfer_provider() = default;
 
+  virtual char const* name() const = 0;
+
   virtual void stop_transfers(location_idx_t l, bool fwd,
                               std::vector<tad_transfer_edge>& out) const = 0;
 };
@@ -25,6 +27,8 @@ struct footpath_transfer_provider : public tad_transfer_provider {
 
   footpath_transfer_provider(timetable const& tt, profile_idx_t prf_idx)
       : tt_{tt}, prf_idx_{prf_idx} {}
+
+  char const* name() const override { return "footpath_transfer_provider"; }
 
   void stop_transfers(location_idx_t const l, bool const fwd,
                       std::vector<tad_transfer_edge>& out) const override {

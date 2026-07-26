@@ -85,13 +85,17 @@ struct tad_search {
         static_cast<unsigned>(tt_.internal_interval_days().size().count());
     state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size(), n_days,
                   rtt_ ? rtt_->n_rt_transports() : 0U);
-    if (transfer_index != nullptr && transfer_time_settings_.default_ &&
-        transfer_index->is_valid_for(prf_idx_)) {
+    if (transfer_index != nullptr &&
+        transfer_index->is_valid_for(tt_, prf_idx_, 15, transfer_time_settings_)) {
       transfer_provider_ = std::make_unique<shortcut_transfer_provider>(
           transfer_index->profiles_[cista::to_idx(prf_idx_)]);
     } else {
       transfer_provider_ = std::make_unique<footpath_transfer_provider>(tt_, prf_idx_);
     }
+  }
+
+  char const* transfer_provider_name() const {
+    return transfer_provider_ ? transfer_provider_->name() : "none";
   }
 
   tad_stats execute(std::vector<std::pair<location_idx_t, delta_t>> const& starts,

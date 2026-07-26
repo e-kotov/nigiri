@@ -214,6 +214,7 @@ routing_result tad_route(
             total_stats.scanned_routes_ += stats.scanned_routes_;
             total_stats.scanned_stop_events_ += stats.scanned_stop_events_;
             total_stats.relaxed_walking_edges_ += stats.relaxed_walking_edges_;
+            total_stats.relaxed_transfers_ += stats.relaxed_transfers_;
             total_stats.pruned_scans_ += stats.pruned_scans_;
             total_stats.queue_updates_ += stats.queue_updates_;
             total_stats.time_pq_pop_us_ += stats.time_pq_pop_us_;

@@ -58,9 +58,12 @@ struct tad_ultra_builder {
     tad_transfer_index idx;
     idx.version_ = tad_transfer_index::kVersion;
     idx.n_locations_ = static_cast<std::uint32_t>(n_locs);
-    idx.witness_limit_minutes_ = static_cast<std::uint32_t>(witness_transfer_limit_minutes_);
+    idx.witness_limit_minutes_ = witness_transfer_limit_minutes_ < 0
+                                     ? 0U
+                                     : static_cast<std::uint32_t>(witness_transfer_limit_minutes_);
     idx.timetable_n_routes_ = static_cast<std::uint64_t>(tt_.route_location_seq_.size());
     idx.timetable_n_transports_ = static_cast<std::uint64_t>(tt_.transport_traffic_days_.size());
+    idx.timetable_fingerprint_ = tad_transfer_index::compute_tt_fingerprint(tt_);
     idx.profiles_.resize(kNProfiles);
 
     for (profile_idx_t prf = 0; prf < kNProfiles; ++prf) {
@@ -76,13 +79,24 @@ struct tad_ultra_builder {
         for (std::size_t i = 0; i < n_locs; ++i) {
           auto const src = location_idx_t{static_cast<std::uint32_t>(i)};
           if (i < footpaths_out.size()) {
+            auto const src_parent = cista::to_idx(src) < tt_.locations_.parents_.size() &&
+                                            tt_.locations_.parents_[src] != location_idx_t::invalid()
+                                        ? tt_.locations_.parents_[src]
+                                        : src;
             for (auto const& fp : footpaths_out[src]) {
               auto const target = fp.target();
               if (cista::to_idx(target) < n_locs && target != src) {
-                auto const dur = fp.duration();
-                auto it = out_shortcuts[i].find(target);
-                if (it == out_shortcuts[i].end() || dur < it->second) {
-                  out_shortcuts[i][target] = dur;
+                auto const target_parent =
+                    cista::to_idx(target) < tt_.locations_.parents_.size() &&
+                            tt_.locations_.parents_[target] != location_idx_t::invalid()
+                        ? tt_.locations_.parents_[target]
+                        : target;
+                if (src_parent == target_parent) {
+                  auto const dur = fp.duration();
+                  auto it = out_shortcuts[i].find(target);
+                  if (it == out_shortcuts[i].end() || dur < it->second) {
+                    out_shortcuts[i][target] = dur;
+                  }
                 }
               }
             }
