@@ -55,10 +55,11 @@ struct tad_ultra_builder {
   tad_transfer_index build() const {
     tad_transfer_index idx;
     idx.version_ = tad_transfer_index::kVersion;
-    idx.n_locations_ = tt_.n_locations();
-
-    auto const n_profiles = tt_.locations_.footpaths_out_.size();
-    idx.profiles_.resize(n_profiles);
+    idx.n_locations_ = static_cast<std::uint32_t>(n_locs);
+    idx.witness_limit_minutes_ = static_cast<std::uint32_t>(witness_transfer_limit_minutes_);
+    idx.timetable_n_routes_ = static_cast<std::uint64_t>(tt_.route_location_seq_.size());
+    idx.timetable_n_transports_ = static_cast<std::uint64_t>(tt_.transport_traffic_days_.size());
+    idx.profiles_.resize(kNProfiles);
 
     auto const n_locs = tt_.n_locations();
 

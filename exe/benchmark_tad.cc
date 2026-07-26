@@ -242,6 +242,7 @@ int main(int argc, char* argv[]) {
   auto qa_path = std::filesystem::path{};
   auto transfer_mode_str = std::string{"base"};
   auto witness_limit = int{15};
+  auto ultra_index_path = std::filesystem::path{};
 
   bpo::options_description desc("Allowed options");
   desc.add_options()("help,h", "produce this help message")  //
@@ -256,6 +257,8 @@ int main(int argc, char* argv[]) {
       ("witness_limit",
        bpo::value<int>(&witness_limit)->default_value(15),
        "ULTRA witness transfer limit in minutes")  //
+      ("ultra_index_path", bpo::value(&ultra_index_path),
+       "path to save/load precomputed ULTRA transfer index binary file")  //
       ("num_queries,n", bpo::value(&n_queries)->default_value(n_queries),
        "number of queries to generate/process")(
           "interval_size,i",
@@ -436,12 +439,31 @@ int main(int argc, char* argv[]) {
 
   std::optional<routing::tad_transfer_index> ultra_idx;
   if (transfer_mode_str == "ultra") {
-    std::cout << "building ULTRA transfer index (witness limit = " << witness_limit << " min)...\n";
-    auto const build_start = std::chrono::steady_clock::now();
-    ultra_idx = routing::build_tad_ultra_index(tt, witness_limit);
-    auto const build_dur = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - build_start);
-    std::cout << "ULTRA transfer index built in " << build_dur.count() << " ms\n";
+    bool loaded = false;
+    if (!ultra_index_path.empty() && std::filesystem::exists(ultra_index_path)) {
+      std::cout << "loading ULTRA transfer index from " << ultra_index_path << "...\n";
+      auto loaded_idx = routing::tad_transfer_index::read(ultra_index_path);
+      if (loaded_idx.has_value() && loaded_idx->is_valid_for(tt, gs.prf_idx_, witness_limit)) {
+        ultra_idx = std::move(loaded_idx);
+        loaded = true;
+        std::cout << "ULTRA transfer index loaded successfully (valid version & timetable matched)\n";
+      } else {
+        std::cout << "ULTRA index at " << ultra_index_path
+                  << " is INVALID or MISMATCHED for current timetable/witness limit. Re-building...\n";
+      }
+    }
+    if (!loaded) {
+      std::cout << "building ULTRA transfer index (witness limit = " << witness_limit << " min)...\n";
+      auto const build_start = std::chrono::steady_clock::now();
+      ultra_idx = routing::build_tad_ultra_index(tt, witness_limit);
+      auto const build_dur = std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - build_start);
+      std::cout << "ULTRA transfer index built in " << build_dur.count() << " ms\n";
+      if (!ultra_index_path.empty()) {
+        std::cout << "saving ULTRA transfer index to " << ultra_index_path << "...\n";
+        ultra_idx->write(ultra_index_path);
+      }
+    }
   } else if (transfer_mode_str != "base") {
     std::cout << "Error: Invalid transfer_mode '" << transfer_mode_str << "' (expected 'base' or 'ultra')\n";
     return 1;
