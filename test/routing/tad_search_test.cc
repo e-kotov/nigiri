@@ -880,6 +880,7 @@ TEST(routing, tad_shortcut_transfer_provider) {
   idx.profiles_.resize(1);
 
   auto& prf = idx.profiles_[0];
+  prf.transfer_time_fingerprint_ = "mock_fingerprint";
   prf.out_offsets_.resize(11, 0);
   prf.in_offsets_.resize(11, 0);
   prf.out_offsets_[1] = 0;
