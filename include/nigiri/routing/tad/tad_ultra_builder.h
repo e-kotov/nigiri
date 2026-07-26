@@ -245,7 +245,6 @@ private:
           auto const& st = grouping.stations_[st_idx];
           auto const rep = st.representative_;
           if (rep == location_idx_t::invalid() || cista::to_idx(rep) >= n_locs) return;
-          std::cout << "DEBUG REP: " << cista::to_idx(rep) << "\n";
 
           std::vector<duration_t> direct_dist(n_locs, duration_t::max());
           std::vector<location_idx_t> direct_stops;
@@ -519,9 +518,6 @@ private:
                         std::lock_guard lock{shortcut_mutex};
                         auto it = out_shortcuts[tp_idx].find(route_parent);
                         if (it == out_shortcuts[tp_idx].end() || dur < it->second) {
-                          std::cout << "DEBUG WITNESS SHORTCUT EMITTED: tp_idx=" << tp_idx
-                                    << " -> route_parent=" << cista::to_idx(route_parent)
-                                    << " dur=" << dur.count() << "m\n";
                           out_shortcuts[tp_idx][route_parent] = dur;
                         }
                       }
