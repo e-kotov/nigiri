@@ -443,7 +443,11 @@ int main(int argc, char* argv[]) {
     if (!ultra_index_path.empty() && std::filesystem::exists(ultra_index_path)) {
       std::cout << "loading ULTRA transfer index from " << ultra_index_path << "...\n";
       auto loaded_idx = routing::tad_transfer_index::read(ultra_index_path);
-      if (loaded_idx.has_value() && loaded_idx->is_valid_for(tt, gs.prf_idx_, witness_limit)) {
+      // The only O(timetable) validation in the whole run: hash the timetable
+      // once here, then every query is an O(1) check against the cached verdict.
+      if (loaded_idx.has_value() &&
+          loaded_idx->validate_for_timetable(tt, witness_limit) &&
+          loaded_idx->has_shortcuts_for(gs.prf_idx_)) {
         ultra_idx = std::move(loaded_idx);
         loaded = true;
         std::cout << "ULTRA transfer index loaded successfully (valid version & timetable matched)\n";
@@ -473,13 +477,8 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  if (transfer_mode_str == "ultra") {
-    if (!gs.transfer_time_settings_.default_) {
-      std::cout << "WARNING: ULTRA transfer index requested, but non-default transfer_time_settings "
-                << "(--min_transfer_time / --transfer_time_factor) were specified! "
-                << "Search will fall back to footpath_transfer_provider.\n";
-    }
-  }
+  // The fallback warning itself lives in the library (warn_transfer_index_unusable),
+  // so a MOTIS server sees it too rather than only this benchmark harness.
 
   auto queries = std::vector<nigiri::query_generation::start_dest_query>{};
   generate_queries(queries, n_queries, tt, gs, seed);

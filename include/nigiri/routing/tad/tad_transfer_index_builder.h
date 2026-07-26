@@ -14,13 +14,13 @@ namespace nigiri::routing {
 inline tad_transfer_index build_tad_transfer_index(timetable const& tt) {
   tad_transfer_index idx;
   idx.version_ = tad_transfer_index::kVersion;
-  idx.n_locations_ = tt.locations_.parents_.empty()
-                         ? static_cast<std::uint32_t>(tt.n_locations())
-                         : static_cast<std::uint32_t>(tt.locations_.parents_.size());
+  idx.n_locations_ = tad_transfer_index::expected_n_locations(tt);
   idx.witness_limit_minutes_ = 0U;
   idx.timetable_n_routes_ = static_cast<std::uint64_t>(tt.route_location_seq_.size());
   idx.timetable_n_transports_ = static_cast<std::uint64_t>(tt.transport_traffic_days_.size());
   idx.timetable_fingerprint_ = tad_transfer_index::compute_tt_fingerprint(tt);
+  // Derived from tt itself, so it matches by construction.
+  idx.timetable_validated_ = true;
 
   auto const n_profiles = tt.locations_.footpaths_out_.size();
   idx.profiles_.resize(n_profiles);

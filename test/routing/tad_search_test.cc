@@ -889,8 +889,8 @@ TEST(routing, tad_shortcut_transfer_provider) {
   }
   prf.out_edges_.push_back(routing::tad_transfer_edge{location_idx_t{2}, duration_t{5}});
 
-  EXPECT_TRUE(idx.is_valid_for(profile_idx_t{0}));
-  EXPECT_FALSE(idx.is_valid_for(profile_idx_t{1}));
+  EXPECT_TRUE(idx.has_shortcuts_for(profile_idx_t{0}));
+  EXPECT_FALSE(idx.has_shortcuts_for(profile_idx_t{1}));
 
   routing::shortcut_transfer_provider provider(prf);
   std::vector<routing::tad_transfer_edge> edges;
@@ -904,7 +904,7 @@ TEST(routing, tad_shortcut_transfer_provider) {
   EXPECT_TRUE(edges.empty());
 
   prf.out_offsets_[3] = 0;
-  EXPECT_FALSE(idx.is_valid_for(profile_idx_t{0}));
+  EXPECT_FALSE(idx.has_shortcuts_for(profile_idx_t{0}));
 }
 
 TEST(routing, tad_shortcut_scalar_parity) {
@@ -915,7 +915,7 @@ TEST(routing, tad_shortcut_scalar_parity) {
   finalize(tt);
 
   auto const transfer_idx = routing::build_tad_transfer_index(tt);
-  EXPECT_TRUE(transfer_idx.is_valid_for(profile_idx_t{0}));
+  EXPECT_TRUE(transfer_idx.is_valid_for_query(profile_idx_t{0}));
 
   auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
@@ -1019,7 +1019,7 @@ TEST(routing, tad_ultra_builder_valid_index) {
   finalize(tt);
 
   auto const idx = routing::build_tad_ultra_index(tt, 15);
-  EXPECT_TRUE(idx.is_valid_for(profile_idx_t{0}));
+  EXPECT_TRUE(idx.is_valid_for_query(profile_idx_t{0}));
   EXPECT_EQ(tt.n_locations(), idx.n_locations_);
   EXPECT_EQ("ultra_witness_shortcuts_v1", idx.profiles_[0].transfer_time_fingerprint_);
 }
@@ -1032,7 +1032,7 @@ TEST(routing, tad_ultra_shortcut_scalar_parity) {
   finalize(tt);
 
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
-  EXPECT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
+  EXPECT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
 
   auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
@@ -1118,7 +1118,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
 
   // 1. Build index with witness transfer limit = 15 minutes (>= 7 min multi-hop walk).
   auto const ultra_idx_15 = routing::build_tad_ultra_index(tt, 15);
-  ASSERT_TRUE(ultra_idx_15.is_valid_for(profile_idx_t{0}));
+  ASSERT_TRUE(ultra_idx_15.is_valid_for_query(profile_idx_t{0}));
 
   auto const b_idx = cista::to_idx(loc_b);
   auto const b_start = ultra_idx_15.profiles_[0].out_offsets_[b_idx];
@@ -1173,7 +1173,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
 
   // 2. Build index with witness transfer limit = 5 minutes (< 7 min multi-hop walk).
   auto const ultra_idx_5 = routing::build_tad_ultra_index(tt, 5);
-  ASSERT_TRUE(ultra_idx_5.is_valid_for(profile_idx_t{0}));
+  ASSERT_TRUE(ultra_idx_5.is_valid_for_query(profile_idx_t{0}));
 
   // Verify intermediate footpath B -> X (3 min) is pruned.
   auto const b_start_5 = ultra_idx_5.profiles_[0].out_offsets_[b_idx];
@@ -1242,7 +1242,7 @@ TEST(routing, tad_ultra_builder_limit_validation) {
 
   // 1. Negative limit (-10) is clamped to 0 minutes via safe_limit_duration, emitting no multi-hop shortcuts.
   auto const ultra_idx_neg = routing::build_tad_ultra_index(tt, -10);
-  ASSERT_TRUE(ultra_idx_neg.is_valid_for(profile_idx_t{0}));
+  ASSERT_TRUE(ultra_idx_neg.is_valid_for_query(profile_idx_t{0}));
   auto const b_idx = cista::to_idx(loc_b);
   auto const b_start_neg = ultra_idx_neg.profiles_[0].out_offsets_[b_idx];
   auto const b_end_neg = ultra_idx_neg.profiles_[0].out_offsets_[b_idx + 1];
@@ -1256,7 +1256,7 @@ TEST(routing, tad_ultra_builder_limit_validation) {
 
   // 2. Oversized limit (100000) is clamped to 32767 minutes without wrapping into negative duration.
   auto const ultra_idx_large = routing::build_tad_ultra_index(tt, 100000);
-  ASSERT_TRUE(ultra_idx_large.is_valid_for(profile_idx_t{0}));
+  ASSERT_TRUE(ultra_idx_large.is_valid_for_query(profile_idx_t{0}));
   auto const b_start_large = ultra_idx_large.profiles_[0].out_offsets_[b_idx];
   auto const b_end_large = ultra_idx_large.profiles_[0].out_offsets_[b_idx + 1];
   bool found_b_to_c_large = false;
@@ -1290,7 +1290,7 @@ TEST(routing, tad_access_shortcut_integration) {
   finalize(tt);
 
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
-  ASSERT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
+  ASSERT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
 
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
   routing::query q;
@@ -1357,7 +1357,7 @@ TEST(routing, tad_access_shortcut_conflict_resolution) {
   finalize(tt);
 
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
-  ASSERT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
+  ASSERT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
 
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
   routing::query q;
@@ -1409,7 +1409,7 @@ TEST(routing, tad_egress_shortcut_integration) {
   finalize(tt);
 
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
-  ASSERT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
+  ASSERT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
 
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
   routing::query q;
@@ -1505,7 +1505,7 @@ TEST(routing, tad_ultra_direct_transfer_edge_routing) {
 
   // Build ULTRA transfer index with witness limit = 15 mins
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
-  ASSERT_TRUE(ultra_idx.is_valid_for(profile_idx_t{0}));
+  ASSERT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
 
   // Verify that the ULTRA index preserves the direct transfer edge B -> C
   // using the duration produced by the HRD fixture loader.
@@ -1621,57 +1621,179 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   finalize(tt);
 
   auto const idx = routing::build_tad_ultra_index(tt, 15);
-  EXPECT_TRUE(idx.is_valid_for(tt, profile_idx_t{0}, 15));
+  ASSERT_TRUE(idx.is_valid_for(tt, profile_idx_t{0}, 15));
 
-  // 1. Mutate route_stop_times_
-  {
-    timetable tt_mut = tt;
-    if (!tt_mut.route_stop_times_.empty()) {
-      tt_mut.route_stop_times_[0U] = delta{5};
-      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
-    }
-  }
+  // Every in-place mutation below indexes element 0 of some container. If the
+  // fixture were degenerate the mutation would be a silent no-op and the test
+  // would still report green, so require a non-empty fixture up front.
+  ASSERT_NE(0U, tt.n_locations());
+  ASSERT_FALSE(tt.route_stop_times_.empty());
+  ASSERT_FALSE(tt.transport_route_.empty());
+  ASSERT_FALSE(tt.transport_traffic_days_.empty());
+  ASSERT_FALSE(tt.bitfields_.empty());
+  ASSERT_FALSE(tt.route_transport_ranges_.empty());
+  ASSERT_FALSE(tt.route_stop_time_ranges_.empty());
+  ASSERT_FALSE(tt.locations_.parents_.empty());
+  ASSERT_FALSE(tt.locations_.equivalences_.empty());
+  ASSERT_FALSE(tt.locations_.children_.empty());
 
-  // 2. Mutate footpaths_in_
-  {
-    timetable tt_mut = tt;
-    if (!tt_mut.locations_.footpaths_in_.empty() &&
-        !tt_mut.locations_.footpaths_in_[profile_idx_t{0}].empty()) {
-      tt_mut.locations_.footpaths_in_[profile_idx_t{0}][location_idx_t{0}].push_back(
-          footpath{location_idx_t{0}, duration_t{10}});
-      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
-    }
-  }
+  // One case per input group hashed by compute_tt_fingerprint(). Keep this
+  // table in step with that function: an unhashed input is an index that
+  // survives a timetable change it should not survive.
+  struct mutation_case {
+    char const* name_;
+    void (*mutate_)(timetable&);
+  };
+  auto const cases = std::vector<mutation_case>{
+      {"n_locations",
+       [](timetable& m) {
+         // Grow names_ and parents_ together: register_location() keeps them
+         // in lockstep and expected_n_locations() asserts on that invariant.
+         m.locations_.names_.resize(m.locations_.names_.size() + 1U);
+         m.locations_.parents_.resize(m.locations_.parents_.size() + 1U);
+       }},
+      {"route_location_seq_",
+       [](timetable& m) {
+         m.route_location_seq_.emplace_back(std::vector<stop::value_type>{});
+       }},
+      {"transport_traffic_days_",
+       [](timetable& m) {
+         m.transport_traffic_days_[transport_idx_t{0}] = bitfield_idx_t{999};
+       }},
+      {"parents_",
+       [](timetable& m) {
+         m.locations_.parents_[location_idx_t{0}] = location_idx_t{999};
+       }},
+      {"equivalences_",
+       [](timetable& m) {
+         m.locations_.equivalences_[location_idx_t{0}].push_back(
+             location_idx_t{999});
+       }},
+      {"children_",
+       [](timetable& m) {
+         m.locations_.children_[location_idx_t{0}].push_back(
+             location_idx_t{999});
+       }},
+      {"location_routes_",
+       [](timetable& m) {
+         m.location_routes_.emplace_back(
+             std::vector<route_idx_t>{route_idx_t{999}});
+       }},
+      {"bitfields_",
+       [](timetable& m) {
+         auto& bf = m.bitfields_[bitfield_idx_t{0}];
+         bf.set(0U, !bf.test(0U));
+       }},
+      {"route_stop_times_",
+       [](timetable& m) {
+         // Derive the new value from the old one so it cannot coincide with it.
+         auto& d = m.route_stop_times_[0U];
+         d = delta{static_cast<std::uint16_t>(d.count() + 1)};
+       }},
+      {"transport_route_",
+       [](timetable& m) {
+         m.transport_route_[transport_idx_t{0}] = route_idx_t{999};
+       }},
+      {"date_range_from_",
+       [](timetable& m) { m.date_range_.from_ += date::days{1}; }},
+      {"date_range_to_",
+       [](timetable& m) { m.date_range_.to_ += date::days{1}; }},
+      {"footpaths_out_",
+       [](timetable& m) {
+         m.locations_.footpaths_out_[0].emplace_back(
+             std::vector<footpath>{footpath{location_idx_t{0}, duration_t{10}}});
+       }},
+      {"footpaths_in_",
+       [](timetable& m) {
+         m.locations_.footpaths_in_[0].emplace_back(
+             std::vector<footpath>{footpath{location_idx_t{0}, duration_t{10}}});
+       }},
+      {"route_transport_ranges_",
+       [](timetable& m) {
+         m.route_transport_ranges_[route_idx_t{0}].to_ = transport_idx_t{999};
+       }},
+      {"route_stop_time_ranges_",
+       [](timetable& m) {
+         m.route_stop_time_ranges_[route_idx_t{0}].to_ += 1U;
+       }},
+  };
 
-  // 3. Mutate transport_route_
-  {
+  for (auto const& c : cases) {
     timetable tt_mut = tt;
-    if (!tt_mut.transport_route_.empty()) {
-      tt_mut.transport_route_[transport_idx_t{0}] = route_idx_t{999};
-      EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
-    }
+    c.mutate_(tt_mut);
+    EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15))
+        << "mutating " << c.name_ << " did not invalidate the index";
   }
+}
 
-  // 4. Mutate date_range_
-  {
-    timetable tt_mut = tt;
-    tt_mut.date_range_.from_ += date::days{1};
-    EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
-  }
+TEST(routing, tad_ultra_index_requires_setup_time_validation) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+  finalize(tt);
 
-  // 5. Mutate location_routes_
-  {
-    timetable tt_mut = tt;
-    tt_mut.location_routes_.emplace_back(std::vector<route_idx_t>{route_idx_t{999}});
-    EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
-  }
+  auto const idx = routing::build_tad_ultra_index(tt, 15);
+  auto const tmp_path =
+      std::filesystem::temp_directory_path() / "test_ultra_index_validation.bin";
+  std::filesystem::remove(tmp_path);
+  ASSERT_TRUE(idx.write(tmp_path));
 
-  // 6. Mutate children_
-  {
-    timetable tt_mut = tt;
-    tt_mut.locations_.children_.clear();
-    EXPECT_FALSE(idx.is_valid_for(tt_mut, profile_idx_t{0}, 15));
-  }
+  auto read_idx = routing::tad_transfer_index::read(tmp_path);
+  ASSERT_TRUE(read_idx.has_value());
+
+  // A deserialized index carries no proof that it matches this timetable, so
+  // the query path must reject it until setup has validated it once.
+  EXPECT_TRUE(read_idx->has_shortcuts_for(profile_idx_t{0}));
+  EXPECT_FALSE(read_idx->is_valid_for_query(profile_idx_t{0}));
+
+  EXPECT_FALSE(read_idx->validate_for_timetable(tt, 30));
+  EXPECT_FALSE(read_idx->is_valid_for_query(profile_idx_t{0}));
+
+  EXPECT_TRUE(read_idx->validate_for_timetable(tt, 15));
+  EXPECT_TRUE(read_idx->is_valid_for_query(profile_idx_t{0}));
+
+  // Non-default transfer time settings still disable the shortcuts per query.
+  routing::transfer_time_settings non_default_tts;
+  non_default_tts.default_ = false;
+  EXPECT_FALSE(read_idx->is_valid_for_query(profile_idx_t{0}, non_default_tts));
+
+  std::filesystem::remove(tmp_path);
+}
+
+TEST(routing, tad_query_does_not_recompute_timetable_fingerprint) {
+  constexpr auto const src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
+  finalize(tt);
+
+  auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
+  ASSERT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
+
+  auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
+  auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
+
+  routing::query q;
+  q.start_time_ = unixtime_t{sys_days{2020_y / March / 30}} + 2_hours;
+  q.start_.push_back(routing::offset{start_loc, 0_minutes, 0});
+  q.destination_.push_back(routing::offset{dest_loc, 0_minutes, 0});
+
+  // Hashing the timetable is O(timetable) and belongs to index setup only.
+  // Doing it per query silently turns every ULTRA measurement into a
+  // measurement of the validation itself.
+  auto const before =
+      routing::tad_transfer_index::n_fingerprint_computations_.load();
+
+  routing::search_state s_state;
+  routing::tad_state t_state;
+  auto const res = routing::tad_route(tt, nullptr, s_state, t_state, q,
+                                      direction::kForward, std::nullopt,
+                                      &ultra_idx);
+  ASSERT_EQ(1ULL, res.algo_stats_.at("tad_using_shortcut_provider"));
+
+  EXPECT_EQ(before,
+            routing::tad_transfer_index::n_fingerprint_computations_.load());
 }
 
 

@@ -57,15 +57,15 @@ struct tad_ultra_builder {
 
     tad_transfer_index idx;
     idx.version_ = tad_transfer_index::kVersion;
-    idx.n_locations_ = tt_.locations_.parents_.empty()
-                           ? static_cast<std::uint32_t>(n_locs)
-                           : static_cast<std::uint32_t>(tt_.locations_.parents_.size());
+    idx.n_locations_ = tad_transfer_index::expected_n_locations(tt_);
     idx.witness_limit_minutes_ = witness_transfer_limit_minutes_ < 0
                                      ? 0U
                                      : static_cast<std::uint32_t>(witness_transfer_limit_minutes_);
     idx.timetable_n_routes_ = static_cast<std::uint64_t>(tt_.route_location_seq_.size());
     idx.timetable_n_transports_ = static_cast<std::uint64_t>(tt_.transport_traffic_days_.size());
     idx.timetable_fingerprint_ = tad_transfer_index::compute_tt_fingerprint(tt_);
+    // Derived from tt_ itself, so it matches by construction.
+    idx.timetable_validated_ = true;
     idx.profiles_.resize(kNProfiles);
 
     for (profile_idx_t prf = 0; prf < kNProfiles; ++prf) {

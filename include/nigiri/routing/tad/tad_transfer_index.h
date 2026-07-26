@@ -1,11 +1,15 @@
 #pragma once
 
+#include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <system_error>
 
+#include "nigiri/logging.h"
 #include "nigiri/routing/tad/tad_transfer_provider.h"
 #include "nigiri/types.h"
 
@@ -50,7 +54,18 @@ struct tad_transfer_index {
   std::uint64_t timetable_fingerprint_{0U};
   vector<tad_profile_shortcuts> profiles_;
 
+  // Runtime-only, never serialized: set by validate_for_timetable() at index
+  // load time, or by a builder that derived the index from the timetable it is
+  // about to be used with. read() leaves it false, so a freshly loaded index is
+  // unusable until it has been validated once.
+  bool timetable_validated_{false};
+
+  // Diagnostic: how often the O(timetable) fingerprint was computed. Setup
+  // hashes the timetable once per index; a query must never increment this.
+  static inline std::atomic<std::uint64_t> n_fingerprint_computations_{0U};
+
   static std::uint64_t compute_tt_fingerprint(timetable const& tt) {
+    n_fingerprint_computations_.fetch_add(1U, std::memory_order_relaxed);
     std::uint64_t fp = 14695981039346656037ULL;  // FNV-1a 64-bit offset basis
     auto const fnv_combine = [&](std::uint64_t val) {
       fp ^= val;
@@ -178,49 +193,61 @@ struct tad_transfer_index {
     return fp;
   }
 
+  // register_location() keeps parents_ in lockstep with names_, so n_locations()
+  // is the single source of truth for the location count. Timetables assembled
+  // by hand in tests may leave parents_ empty; anything else is a bug.
+  static std::uint32_t expected_n_locations(timetable const& tt) {
+    assert(tt.locations_.parents_.empty() ||
+           tt.locations_.parents_.size() == tt.n_locations());
+    return static_cast<std::uint32_t>(tt.n_locations());
+  }
+
+  // O(timetable): re-hashes every input group the builder consumed.
   bool is_valid_for_tt(timetable const& tt) const {
     auto const expected_tt_fp = compute_tt_fingerprint(tt);
-    auto const expected_n_locs = tt.locations_.parents_.empty()
-                                     ? tt.n_locations()
-                                     : static_cast<std::uint32_t>(tt.locations_.parents_.size());
 
     return version_ == kVersion &&
-           n_locations_ == expected_n_locs &&
+           n_locations_ == expected_n_locations(tt) &&
            timetable_n_routes_ == static_cast<std::uint64_t>(tt.route_location_seq_.size()) &&
            timetable_n_transports_ == static_cast<std::uint64_t>(tt.transport_traffic_days_.size()) &&
            timetable_fingerprint_ == expected_tt_fp;
   }
 
-  bool is_valid_for(profile_idx_t const prf_idx,
-                    transfer_time_settings const& tts = {}) const {
-    return is_valid_for(prf_idx, static_cast<int>(witness_limit_minutes_), tts);
+  bool matches_witness_limit(int const witness_limit) const {
+    return witness_limit_minutes_ ==
+           (witness_limit < 0 ? 0U : static_cast<std::uint32_t>(witness_limit));
   }
 
-  bool is_valid_for(profile_idx_t const prf_idx,
-                    int const witness_limit,
-                    transfer_time_settings const& tts = {}) const {
-    auto const normalized_witness_limit =
-        witness_limit < 0 ? 0U : static_cast<std::uint32_t>(witness_limit);
+  // O(1): are there usable shortcuts for this profile? Independent of the
+  // timetable contents.
+  bool has_shortcuts_for(profile_idx_t const prf_idx) const {
     auto const p_idx = cista::to_idx(prf_idx);
-
     return version_ == kVersion && p_idx < profiles_.size() &&
            profiles_[p_idx].has_offsets_for(n_locations_) &&
-           !profiles_[p_idx].transfer_time_fingerprint_.empty() &&
-           witness_limit_minutes_ == normalized_witness_limit &&
-           tts.is_default();
+           !profiles_[p_idx].transfer_time_fingerprint_.empty();
   }
 
-  bool is_valid_for(timetable const& tt,
-                    profile_idx_t const prf_idx,
-                    transfer_time_settings const& tts = {}) const {
-    return is_valid_for(tt, prf_idx, static_cast<int>(witness_limit_minutes_), tts);
+  // O(timetable). Call exactly once, at index load or build time. Caches the
+  // verdict so the query path can stay O(1).
+  bool validate_for_timetable(timetable const& tt, int const witness_limit) {
+    timetable_validated_ = matches_witness_limit(witness_limit) && is_valid_for_tt(tt);
+    return timetable_validated_;
   }
 
+  // O(1). The query hot path: no timetable hashing, no allocation.
+  bool is_valid_for_query(profile_idx_t const prf_idx,
+                          transfer_time_settings const& tts = {}) const {
+    return timetable_validated_ && has_shortcuts_for(prf_idx) && tts.is_default();
+  }
+
+  // O(timetable). One-shot equivalent of validate_for_timetable() followed by
+  // is_valid_for_query(), for callers holding a const index.
   bool is_valid_for(timetable const& tt,
                     profile_idx_t const prf_idx,
                     int const witness_limit,
                     transfer_time_settings const& tts = {}) const {
-    return is_valid_for(prf_idx, witness_limit, tts) && is_valid_for_tt(tt);
+    return has_shortcuts_for(prf_idx) && matches_witness_limit(witness_limit) &&
+           tts.is_default() && is_valid_for_tt(tt);
   }
 
   bool write(std::filesystem::path const& path) const {
@@ -332,6 +359,24 @@ struct tad_transfer_index {
     return idx;
   }
 };
+
+// A search handed an index it cannot use silently degrades to base footpaths,
+// which looks like a correct but slow result. Say so once per process so the
+// degradation is visible in a server log, not only in a benchmark harness.
+inline void warn_transfer_index_unusable(tad_transfer_index const& idx,
+                                         profile_idx_t const prf_idx,
+                                         transfer_time_settings const& tts) {
+  static std::once_flag once;
+  std::call_once(once, [&]() {
+    log(log_lvl::error, "routing.tad",
+        "transfer index unusable, falling back to footpath_transfer_provider "
+        "(timetable_validated={}, profile={}, has_shortcuts={}, "
+        "default_transfer_time_settings={})",
+        idx.timetable_validated_,
+        static_cast<unsigned>(cista::to_idx(prf_idx)),
+        idx.has_shortcuts_for(prf_idx), tts.is_default());
+  });
+}
 
 struct shortcut_transfer_provider : public tad_transfer_provider {
   tad_profile_shortcuts const& shortcuts_;

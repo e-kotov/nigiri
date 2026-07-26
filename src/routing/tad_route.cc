@@ -50,10 +50,14 @@ routing_result tad_route(
     
     std::unique_ptr<tad_transfer_provider> transfer_provider;
     if (transfer_index != nullptr &&
-        transfer_index->is_valid_for(tt, q.prf_idx_, q.transfer_time_settings_)) {
+        transfer_index->is_valid_for_query(q.prf_idx_, q.transfer_time_settings_)) {
         transfer_provider = std::make_unique<shortcut_transfer_provider>(
             transfer_index->profiles_[cista::to_idx(q.prf_idx_)]);
     } else {
+        if (transfer_index != nullptr) {
+            warn_transfer_index_unusable(*transfer_index, q.prf_idx_,
+                                         q.transfer_time_settings_);
+        }
         transfer_provider = std::make_unique<footpath_transfer_provider>(tt, q.prf_idx_);
     }
 
