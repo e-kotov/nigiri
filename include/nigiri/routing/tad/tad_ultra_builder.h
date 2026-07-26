@@ -57,7 +57,9 @@ struct tad_ultra_builder {
 
     tad_transfer_index idx;
     idx.version_ = tad_transfer_index::kVersion;
-    idx.n_locations_ = static_cast<std::uint32_t>(n_locs);
+    idx.n_locations_ = tt_.locations_.parents_.empty()
+                           ? static_cast<std::uint32_t>(n_locs)
+                           : static_cast<std::uint32_t>(tt_.locations_.parents_.size());
     idx.witness_limit_minutes_ = witness_transfer_limit_minutes_ < 0
                                      ? 0U
                                      : static_cast<std::uint32_t>(witness_transfer_limit_minutes_);

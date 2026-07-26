@@ -49,8 +49,8 @@ routing_result tad_route(
     auto const query_delta = unix_to_delta(search_base_date, query_time);
     
     std::unique_ptr<tad_transfer_provider> transfer_provider;
-    if (transfer_index != nullptr && q.transfer_time_settings_.default_ &&
-        transfer_index->is_valid_for(q.prf_idx_)) {
+    if (transfer_index != nullptr &&
+        transfer_index->is_valid_for(tt, q.prf_idx_, q.transfer_time_settings_)) {
         transfer_provider = std::make_unique<shortcut_transfer_provider>(
             transfer_index->profiles_[cista::to_idx(q.prf_idx_)]);
     } else {

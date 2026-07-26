@@ -86,7 +86,7 @@ struct tad_search {
     state_.resize(tt_.n_locations(), tt_.transport_traffic_days_.size(), n_days,
                   rtt_ ? rtt_->n_rt_transports() : 0U);
     if (transfer_index != nullptr &&
-        transfer_index->is_valid_for(tt_, prf_idx_, 15, transfer_time_settings_)) {
+        transfer_index->is_valid_for(tt_, prf_idx_, transfer_time_settings_)) {
       transfer_provider_ = std::make_unique<shortcut_transfer_provider>(
           transfer_index->profiles_[cista::to_idx(prf_idx_)]);
     } else {
