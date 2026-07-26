@@ -53,6 +53,8 @@ struct tad_ultra_builder {
   int witness_transfer_limit_minutes_{15};
 
   tad_transfer_index build() const {
+    auto const n_locs = tt_.n_locations();
+
     tad_transfer_index idx;
     idx.version_ = tad_transfer_index::kVersion;
     idx.n_locations_ = static_cast<std::uint32_t>(n_locs);
@@ -61,9 +63,7 @@ struct tad_ultra_builder {
     idx.timetable_n_transports_ = static_cast<std::uint64_t>(tt_.transport_traffic_days_.size());
     idx.profiles_.resize(kNProfiles);
 
-    auto const n_locs = tt_.n_locations();
-
-    for (profile_idx_t prf = 0; prf < n_profiles; ++prf) {
+    for (profile_idx_t prf = 0; prf < kNProfiles; ++prf) {
       auto& prf_shortcuts = idx.profiles_[cista::to_idx(prf)];
       prf_shortcuts.transfer_time_fingerprint_ = "ultra_witness_shortcuts_v1";
 

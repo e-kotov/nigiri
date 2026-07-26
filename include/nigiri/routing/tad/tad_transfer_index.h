@@ -50,15 +50,19 @@ struct tad_transfer_index {
   std::uint64_t timetable_n_transports_{0U};
   vector<tad_profile_shortcuts> profiles_;
 
+  bool is_valid_for(profile_idx_t const prf_idx) const {
+    auto const p_idx = cista::to_idx(prf_idx);
+    return version_ == kVersion && p_idx < profiles_.size() &&
+           profiles_[p_idx].has_offsets_for(n_locations_);
+  }
+
   bool is_valid_for(timetable const& tt, profile_idx_t const prf_idx, int const witness_limit) const {
     auto const p_idx = cista::to_idx(prf_idx);
-    return version_ == kVersion &&
+    return is_valid_for(prf_idx) &&
            n_locations_ == static_cast<std::uint32_t>(tt.locations_.parents_.size()) &&
            witness_limit_minutes_ == static_cast<std::uint32_t>(witness_limit) &&
            timetable_n_routes_ == static_cast<std::uint64_t>(tt.route_location_seq_.size()) &&
-           timetable_n_transports_ == static_cast<std::uint64_t>(tt.transport_traffic_days_.size()) &&
-           p_idx < profiles_.size() &&
-           profiles_[p_idx].has_offsets_for(n_locations_);
+           timetable_n_transports_ == static_cast<std::uint64_t>(tt.transport_traffic_days_.size());
   }
 
   void write(std::filesystem::path const& path) const {
