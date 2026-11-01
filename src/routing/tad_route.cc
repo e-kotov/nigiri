@@ -14,6 +14,7 @@
 #include "nigiri/routing/raptor/reconstruct.h"
 #include "nigiri/routing/start_times.h"
 #include "utl/equal_ranges_linear.h"
+#include "utl/erase_duplicates.h"
 
 namespace nigiri::routing {
 

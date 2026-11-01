@@ -37,7 +37,7 @@ transport get_earliest_transport(timetable const& tt,
     if constexpr (kFwd) {
       return t.begin();
     } else {
-      return t.rbegin();
+      return std::make_reverse_iterator(t.end());
     }
   };
 
@@ -45,7 +45,7 @@ transport get_earliest_transport(timetable const& tt,
     if constexpr (kFwd) {
       return t.end();
     } else {
-      return t.rend();
+      return std::make_reverse_iterator(t.begin());
     }
   };
 
