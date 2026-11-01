@@ -1801,3 +1801,73 @@ TEST(routing, tad_query_does_not_recompute_timetable_fingerprint) {
 
 
 
+
+// Endpoint-only walks must not depend on an unrelated second transit service
+// inducing an intermediate shortcut. A witness budget is not a walking cap.
+TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
+  constexpr auto src = source_idx_t{0U};
+  auto const first = std::string{R"(
+*Z 01337 80____       048 030                             %
+*A VE 0000001 0000002 000005                              %
+*G RE  0000001 0000002                                    %
+0000001 A                            00200                %
+0000002 B                     00230                       %
+)"};
+  auto const second = std::string{R"(
+*Z 07331 80____       048 030                             %
+*A VE 0000004 0000005 000005                              %
+*G RE  0000004 0000005                                    %
+0000004 C                            00315                %
+0000005 D                     00345                       %
+)"};
+  struct scenario {
+    char const* name_;
+    std::string services_;
+    char const* from_;
+    char const* to_;
+    duration_t walk_;
+  };
+  for (auto const& c : std::vector<scenario>{
+           {"terminal_egress", first, "0000001", "0000004", 7_minutes},
+           {"terminal_access", second, "0000002", "0000005", 7_minutes},
+           {"direct_walk", first, "0000002", "0000004", 7_minutes},
+           {"long_intermediate", first + second, "0000001", "0000005", 16_minutes}}) {
+    SCOPED_TRACE(c.name_);
+    timetable tt;
+    tt.date_range_ = full_period();
+    load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(c.services_), tt);
+    finalize(tt);
+    auto const loc = [&](char const* id) {
+      return tt.locations_.location_id_to_idx_.at({id, src});
+    };
+    auto const b = loc("0000002");
+    auto const c_stop = loc("0000004");
+    tt.locations_.footpaths_out_[0].resize(tt.n_locations());
+    tt.locations_.footpaths_in_[0].resize(tt.n_locations());
+    tt.locations_.footpaths_out_[0][b].push_back(footpath{c_stop, c.walk_});
+    tt.locations_.footpaths_in_[0][c_stop].push_back(footpath{b, c.walk_});
+    auto const idx = routing::build_tad_ultra_index(tt, 15);
+    for (auto const dir : {direction::kForward, direction::kBackward}) {
+      SCOPED_TRACE(dir == direction::kForward ? "forward" : "backward");
+      routing::query q;
+      q.start_time_ = unixtime_t{sys_days{2020_y / March / 30}} +
+                      (dir == direction::kForward ? 0_hours : 6_hours);
+      q.start_.push_back(routing::offset{loc(c.from_), 0_minutes, 0});
+      q.destination_.push_back(routing::offset{loc(c.to_), 0_minutes, 0});
+      routing::search_state s_base, s_idx;
+      routing::tad_state t_base, t_idx;
+      auto const base_result = routing::tad_route(
+          tt, nullptr, s_base, t_base, q, dir);
+      auto const indexed_result = routing::tad_route(
+          tt, nullptr, s_idx, t_idx, q, dir, std::nullopt, &idx);
+      ASSERT_FALSE(base_result.journeys_->empty());
+      EXPECT_EQ(base_result.journeys_->size(), indexed_result.journeys_->size());
+      if (!indexed_result.journeys_->empty()) {
+        EXPECT_EQ(base_result.journeys_->begin()->dest_time_,
+                  indexed_result.journeys_->begin()->dest_time_);
+        EXPECT_EQ(base_result.journeys_->begin()->start_time_,
+                  indexed_result.journeys_->begin()->start_time_);
+      }
+    }
+  }
+}
