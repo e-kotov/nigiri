@@ -132,6 +132,7 @@ struct tad_transfer_index {
   // immutable while queries hold it; revalidate after any construction-time edit.
   bool validate_structure() {
     profile_validated_.fill(false);
+    std::array<bool, kNProfiles> valid{};
     if (profiles_.size() > kNProfiles) return false;
     for (std::size_t p = 0; p < profiles_.size(); ++p) {
       auto const& profile = profiles_[p];
@@ -142,8 +143,9 @@ struct tad_transfer_index {
               edge.duration_ > footpath::kMaxDuration) return false;
         }
       }
-      profile_validated_[p] = !profile.transfer_time_fingerprint_.empty();
+      valid[p] = !profile.transfer_time_fingerprint_.empty();
     }
+    profile_validated_ = valid;
     return true;
   }
 
@@ -176,7 +178,7 @@ struct tad_transfer_index {
   // timetable contents.
   bool has_shortcuts_for(profile_idx_t const prf_idx) const {
     auto const p_idx = cista::to_idx(prf_idx);
-    return version_ == kVersion && p_idx < profiles_.size() &&
+    return version_ == kVersion && p_idx < profiles_.size() && p_idx < kNProfiles &&
            profile_validated_[p_idx];
   }
 

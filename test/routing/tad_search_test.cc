@@ -111,6 +111,7 @@ TEST(routing, tad_forward_basic) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -136,6 +137,7 @@ TEST(routing, tad_rejected_transfer) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -166,6 +168,7 @@ TEST(routing, tad_later_first_leg) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -200,6 +203,7 @@ TEST(routing, tad_unlimited_transfers) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -224,6 +228,7 @@ TEST(routing, tad_no_route) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -248,6 +253,7 @@ TEST(routing, tad_walking_transfer_improvement) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   
   constexpr auto const footpaths = R"(
@@ -316,6 +322,7 @@ TEST(routing, tad_deterministic_equal_time) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -361,6 +368,7 @@ TEST(routing, tad_same_station) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -401,6 +409,7 @@ TEST(routing, tad_zero_duration_transfer) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -461,6 +470,7 @@ TEST(routing, tad_multi_day) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -490,6 +500,7 @@ TEST(routing, tad_multiple_starts_and_destinations) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -558,6 +569,7 @@ TEST(routing, tad_coordinate_offsets) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -621,6 +633,7 @@ TEST(routing, tad_multiple_td_offsets) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -670,6 +683,7 @@ TEST(routing, tad_time_varying_offsets) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -720,6 +734,7 @@ TEST(routing, tad_mixed_static_td_offsets) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
   finalize(tt, ctx);
@@ -760,6 +775,7 @@ TEST(routing, tad_mixed_static_td_offsets) {
 TEST(routing, tad_reconstruct_parent_cycle_guard) {
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   routing::transfer_time_settings tts;
   routing::tad_state state;
   state.resize(3U, 0U, 1U);
@@ -791,6 +807,7 @@ TEST(routing, tad_adversarial_class_filter) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -818,6 +835,7 @@ TEST(routing, tad_max_transfers_post_reconstruction_limitation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -843,6 +861,7 @@ TEST(routing, tad_interval_early_stop) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -870,6 +889,7 @@ TEST(routing, tad_via_leg_destination_node_propagation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -934,6 +954,7 @@ TEST(routing, tad_shortcut_scalar_parity) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -977,6 +998,7 @@ TEST(routing, tad_station_grouping) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -1002,6 +1024,7 @@ TEST(routing, tad_station_grouping) {
 TEST(routing, tad_station_grouping_explicit_relationships) {
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   constexpr std::size_t n_locs = 5;
   tt.locations_.names_.resize(n_locs);
   tt.locations_.parents_.resize(n_locs, location_idx_t::invalid());
@@ -1042,6 +1065,7 @@ TEST(routing, tad_ultra_builder_valid_index) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -1056,6 +1080,7 @@ TEST(routing, tad_ultra_shortcut_scalar_parity) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -1120,6 +1145,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
@@ -1135,14 +1161,14 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   tt.locations_.footpaths_in_[0].resize(tt.n_locations());
 
   // Add multi-hop base footpaths: B -> X (3 min) and X -> C (4 min).
-  // CRITICAL: There is NO direct base footpath B -> C in tt!
+  // No direct base footpath B -> C: the optional shortcut must be geometrically real.
   tt.locations_.footpaths_out_[0][loc_b].push_back(footpath{loc_x, 3_minutes});
   tt.locations_.footpaths_in_[0][loc_x].push_back(footpath{loc_b, 3_minutes});
 
   tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
   tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
 
-  // Add a long base footpath A -> D (120 min) to prove long base footpaths are preserved without dominating transit.
+  // Retain long base paths even when witness candidate generation is bounded.
   tt.locations_.footpaths_out_[0][loc_a].push_back(footpath{loc_d, 120_minutes});
   tt.locations_.footpaths_in_[0][loc_d].push_back(footpath{loc_a, 120_minutes});
 
@@ -1255,6 +1281,7 @@ TEST(routing, tad_ultra_builder_limit_validation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
@@ -1304,6 +1331,7 @@ TEST(routing, tad_access_shortcut_integration) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
@@ -1372,6 +1400,7 @@ TEST(routing, tad_access_shortcut_conflict_resolution) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
@@ -1425,6 +1454,7 @@ TEST(routing, tad_egress_shortcut_integration) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
@@ -1521,6 +1551,7 @@ TEST(routing, tad_ultra_direct_transfer_edge_routing) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
 
   constexpr auto const footpaths = R"(
@@ -1604,6 +1635,7 @@ TEST(routing, tad_ultra_index_binary_serialization_and_validation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
   finalize(tt, ctx);
@@ -1653,6 +1685,7 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
   finalize(tt, ctx);
@@ -1665,6 +1698,9 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   // would still report green, so require a non-empty fixture up front.
   ASSERT_NE(0U, tt.n_locations());
   ASSERT_FALSE(tt.transport_first_dep_.empty());
+  ASSERT_FALSE(tt.pattern_offsets_.empty());
+  ASSERT_FALSE(tt.transport_pattern_.empty());
+  ASSERT_FALSE(tt.route_location_seq_[route_idx_t{0}].empty());
   ASSERT_FALSE(tt.transport_route_.empty());
   ASSERT_FALSE(tt.transport_traffic_days_.empty());
   ASSERT_FALSE(tt.bitfields_.empty());
@@ -1674,7 +1710,7 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   ASSERT_FALSE(tt.locations_.equivalences_.empty());
   ASSERT_NE(0U, tt.locations_.children_.size());
 
-  // One case per input group hashed by compute_tt_fingerprint(). Keep this
+  // Mutation cases for compressed storage and semantic inputs. Keep this
   // table in step with that function: an unhashed input is an index that
   // survives a timetable change it should not survive.
   struct mutation_case {
@@ -1727,6 +1763,22 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
          auto& d = m.transport_first_dep_[transport_idx_t{0}];
          d = delta{static_cast<std::uint16_t>(d.count() + 1)};
        }},
+      {"pattern_offsets_", [](timetable& m) {
+        auto& d = m.pattern_offsets_[0U];
+        d = delta{static_cast<std::uint16_t>(d.count() + 1)};
+      }},
+      {"transport_pattern_", [](timetable& m) {
+        ++m.transport_pattern_[transport_idx_t{0}];
+      }},
+      {"transfer_time_", [](timetable& m) {
+        m.locations_.transfer_time_[location_idx_t{0}] += 1_minutes;
+      }},
+      {"stop_permissions", [](timetable& m) {
+        auto& raw = m.route_location_seq_[route_idx_t{0}][0U];
+        auto const stp = stop{raw};
+        raw = stop{stp.location_idx(), !stp.in_allowed(), stp.out_allowed(),
+                   stp.in_allowed_wheelchair(), stp.out_allowed_wheelchair()}.value();
+      }},
       {"transport_route_",
        [](timetable& m) {
          m.transport_route_[transport_idx_t{0}] = route_idx_t{999};
@@ -1767,6 +1819,7 @@ TEST(routing, tad_ultra_index_requires_setup_time_validation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
   finalize(tt, ctx);
@@ -1803,6 +1856,7 @@ TEST(routing, tad_query_does_not_recompute_timetable_fingerprint) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
   tt.date_range_ = full_period();
   load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
   finalize(tt, ctx);
@@ -1876,6 +1930,7 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
     SCOPED_TRACE(c.name_);
     timetable tt;
   import_context ctx{tt};
+  register_special_stations(tt, ctx);
     tt.date_range_ = full_period();
     load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(c.services_), tt, ctx);
     finalize(tt, ctx);

@@ -61,8 +61,9 @@ routing_result tad_route(
     // Endpoint walking must not depend on intermediate transit witnesses.
     // Non-default adjustments remain per-edge on the fallback path.
     std::unique_ptr<tad_transfer_provider> transfer_provider;
-    if (transfer_index != nullptr &&
-        transfer_index->is_valid_for_query(q.prf_idx_, q.transfer_time_settings_)) {
+    auto const using_shortcuts = transfer_index != nullptr &&
+        transfer_index->is_valid_for_query(q.prf_idx_, q.transfer_time_settings_);
+    if (using_shortcuts) {
         transfer_provider = std::make_unique<endpoint_transfer_provider>(tt, q.prf_idx_);
     } else {
         if (transfer_index != nullptr) {
@@ -469,7 +470,7 @@ routing_result tad_route(
                 if (it != q.td_start_.end()) {
                     auto const dur_opt = get_td_duration(search_dir, std::span{it->second}, cur_query_time);
                     if (dur_opt.has_value()) {
-                        start_match = offset{start_loc, duration_t{dur_opt->first}, dur_opt->second.transport_mode_id_};
+                        start_match = offset{start_loc, duration_t{dur_opt->first}, dur_opt->second.mode()};
                         has_start_match = true;
                     }
                 }
@@ -519,11 +520,11 @@ routing_result tad_route(
             if (fwd) {
                 j.start_time_ = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
                 j.dest_time_ = j.legs_.empty() ? cur_query_time : j.legs_.back().arr_time_;
-                optimize_footpaths<direction::kForward>(tt, rtt, q, j);
+                optimize_footpaths(tt, rtt, q, j);
             } else {
                 j.start_time_ = j.legs_.empty() ? cur_query_time : j.legs_.back().arr_time_;
                 j.dest_time_ = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
-                optimize_footpaths<direction::kBackward>(tt, rtt, q, j);
+                optimize_footpaths(tt, rtt, q, j);
             }
             std::uint8_t num_routes = 0;
             for (auto const& leg : j.legs_) {
@@ -607,7 +608,7 @@ routing_result tad_route(
                     auto const core_arrival = cur_query_time + std::chrono::minutes{dest_label.arrival_time_ - cur_query_delta};
                     auto const dur_opt = get_td_duration(fwd ? direction::kBackward : direction::kForward, std::span{td_offsets}, core_arrival);
                     if (dur_opt.has_value() && should_add_dest(dest_loc, duration_t{dur_opt->first})) {
-                        add_journey_for_dest(dest_loc, offset{dest_loc, dur_opt->first, dur_opt->second.transport_mode_id_});
+                        add_journey_for_dest(dest_loc, offset{dest_loc, dur_opt->first, dur_opt->second.mode()});
                     }
                 }
             }
@@ -687,9 +688,7 @@ routing_result tad_route(
     search_stats search_stats_out;
     search_stats_out.execute_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(execution_duration);
     
-    bool const using_shortcut_provider =
-        (transfer_provider != nullptr &&
-         std::string_view(transfer_provider->name()) == "shortcut_transfer_provider");
+    bool const using_shortcut_provider = using_shortcuts;
 
     std::map<std::string, std::uint64_t> algo_stats_out = {
         {"tad_settled_stop_labels", total_stats.settled_stop_labels_},
