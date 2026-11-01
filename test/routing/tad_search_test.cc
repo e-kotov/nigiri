@@ -1022,7 +1022,7 @@ TEST(routing, tad_station_grouping) {
   EXPECT_EQ(tt.n_locations(), total_members);
 }
 
-TEST(routing, tad_station_grouping_explicit_relationships) {
+TEST(routing, tad_station_grouping_requires_mutual_zero_walks) {
   timetable tt;
   import_context ctx{tt};
   register_special_stations(tt, ctx);
@@ -1048,17 +1048,68 @@ TEST(routing, tad_station_grouping_explicit_relationships) {
 
   tt.locations_.footpaths_out_[0][loc0].push_back(footpath{loc3, 0_minutes});
   tt.locations_.footpaths_out_[0][loc0].push_back(footpath{loc4, 5_minutes});
+  tt.locations_.footpaths_out_[0][loc1].push_back(footpath{loc2, 0_minutes});
+  tt.locations_.footpaths_out_[0][loc2].push_back(footpath{loc3, 0_minutes});
+  tt.locations_.footpaths_out_[0][loc3].push_back(footpath{loc1, 0_minutes});
 
   auto const grouping = routing::build_station_grouping(tt, profile_idx_t{0});
 
   EXPECT_EQ(loc0, grouping.representative(loc0));
-  EXPECT_EQ(loc0, grouping.representative(loc1));
-  EXPECT_EQ(loc0, grouping.representative(loc2));
-  EXPECT_EQ(loc0, grouping.representative(loc3));
+  EXPECT_EQ(loc1, grouping.representative(loc1));
+  EXPECT_EQ(loc1, grouping.representative(loc2));
+  EXPECT_EQ(loc1, grouping.representative(loc3));
   EXPECT_EQ(loc4, grouping.representative(loc4));
 
   for (auto const member : {loc0, loc1, loc2, loc3}) {
     EXPECT_LE(cista::to_idx(grouping.representative(member)), cista::to_idx(member));
+  }
+}
+
+TEST(routing, tad_station_grouping_exhaustive_directed_graphs) {
+  // Each of the six directed edges is absent, zero-minute, or positive.
+  // Boolean transitive closure is independent of the grouping algorithm.
+  for (unsigned graph = 0; graph != 729U; ++graph) {
+    SCOPED_TRACE(graph);
+    timetable tt;
+    tt.locations_.names_.resize(3U);
+    tt.locations_.parents_.resize(3U, location_idx_t::invalid());
+    for (unsigned u = 0; u != 3U; ++u) tt.locations_.equivalences_.emplace_back();
+    for (profile_idx_t p = 0; p != 2; ++p) {
+      tt.locations_.footpaths_out_[p].resize(3U);
+      bool reachable[3][3]{};
+      auto encoding = graph;
+      for (unsigned u = 0; u != 3U; ++u) {
+        reachable[u][u] = true;
+        for (unsigned v = 0; v != 3U; ++v) {
+          if (u == v) continue;
+          auto const edge = encoding % 3U;
+          encoding /= 3U;
+          if (edge == 0U) continue;
+          // Reverse the second profile to exercise profile-specific direction.
+          auto const from = p == 0 ? u : v;
+          auto const to = p == 0 ? v : u;
+          auto const duration = edge == 1U ? 0_minutes : 1_minutes;
+          tt.locations_.footpaths_out_[p][location_idx_t{from}].push_back(
+              footpath{location_idx_t{to}, duration});
+          reachable[from][to] = duration == 0_minutes;
+        }
+      }
+      for (unsigned k = 0; k != 3U; ++k)
+        for (unsigned u = 0; u != 3U; ++u)
+          for (unsigned v = 0; v != 3U; ++v)
+            reachable[u][v] |= reachable[u][k] && reachable[k][v];
+      auto const grouping = routing::build_station_grouping(tt, p);
+      for (unsigned u = 0; u != 3U; ++u) {
+        auto representative = u;
+        for (unsigned v = 0; v != 3U; ++v) {
+          if (reachable[u][v] && reachable[v][u]) representative = std::min(representative, v);
+          EXPECT_EQ(reachable[u][v] && reachable[v][u],
+                    grouping.representative(location_idx_t{u}) ==
+                        grouping.representative(location_idx_t{v}));
+        }
+        EXPECT_EQ(location_idx_t{representative}, grouping.representative(location_idx_t{u}));
+      }
+    }
   }
 }
 
@@ -1181,7 +1232,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   auto const b_start = ultra_idx_15.profiles_[0].out_offsets_[b_idx];
   auto const b_end = ultra_idx_15.profiles_[0].out_offsets_[b_idx + 1];
 
-  // Prove that B -> X (3 min) intermediate footpath between distinct stations is PRUNED (not seeded unconditionally).
+  // The conservative index must retain the original B -> X footpath.
   bool found_b_to_x = false;
   for (auto i = b_start; i < b_end; ++i) {
     if (ultra_idx_15.profiles_[0].out_edges_[i].target_ == loc_x) {
@@ -1276,6 +1327,86 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   EXPECT_EQ(4U, res_default.journeys_->begin()->legs_.size());
   // Shortcut search uses the single emitted ULTRA shortcut (B->C), yielding 3 legs total.
   EXPECT_EQ(3U, res_shortcut.journeys_->begin()->legs_.size());
+}
+
+TEST(routing, tad_ultra_witness_boarding_contract) {
+  struct scenario {
+    char const* name_;
+    int denied_stop_;
+    bool deny_in_;
+    bool wheelchair_only_;
+    bool one_way_zero_;
+    bool expected_;
+  };
+  for (auto const& test : {
+           scenario{"permitted", -1, false, false, false, true},
+           scenario{"first boarding forbidden", 0, true, false, false, false},
+           scenario{"first alighting forbidden", 1, false, false, false, false},
+           scenario{"second boarding forbidden", 2, true, false, false, false},
+           scenario{"second alighting forbidden", 3, false, false, false, false},
+           scenario{"wheelchair boarding forbidden", 2, true, true, false, false},
+           scenario{"one-way zero source link", -1, false, false, true, true}}) {
+    SCOPED_TRACE(test.name_);
+    for (auto const p : {profile_idx_t{0}, kWheelchairProfile}) {
+      SCOPED_TRACE(to_idx(p));
+      constexpr auto src = source_idx_t{0U};
+      timetable tt;
+      tt.date_range_ = full_period();
+      import_context ctx{tt};
+      register_special_stations(tt, ctx);
+      load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
+      finalize(tt, ctx);
+      auto const a = tt.locations_.location_id_to_idx_.at({"0000001", src});
+      auto const b = tt.locations_.location_id_to_idx_.at({"0000002", src});
+      auto const x = tt.locations_.location_id_to_idx_.at({"0000003", src});
+      auto const c = tt.locations_.location_id_to_idx_.at({"0000004", src});
+      auto const d = tt.locations_.location_id_to_idx_.at({"0000005", src});
+      for (auto& buffer : tt.locations_.transfer_time_) buffer = 0_minutes;
+      for (route_idx_t r = 0; r != tt.route_location_seq_.size(); ++r) {
+        for (auto& value : tt.route_location_seq_[r]) {
+          auto const location = stop{value}.location_idx();
+          auto const denied = test.denied_stop_ == (location == a ? 0 : location == b ? 1 : location == c ? 2 : 3);
+          auto const in = !(denied && test.deny_in_);
+          auto const out = !(denied && !test.deny_in_);
+          value = stop{location, test.wheelchair_only_ || in,
+                       test.wheelchair_only_ || out, in, out}.value();
+        }
+      }
+      tt.locations_.footpaths_out_[p].resize(tt.n_locations());
+      tt.locations_.footpaths_in_[p].resize(tt.n_locations());
+      auto const add = [&](location_idx_t const u, location_idx_t const v, duration_t const walk) {
+        tt.locations_.footpaths_out_[p][u].push_back(footpath{v, walk});
+        tt.locations_.footpaths_in_[p][v].push_back(footpath{u, walk});
+      };
+      add(b, x, 3_minutes);
+      add(x, c, 4_minutes);
+      if (test.one_way_zero_) add(a, location_idx_t{0}, 0_minutes);
+
+      auto const idx = routing::build_tad_ultra_index(tt, 15);
+      auto found = false;
+      auto const& profile = idx.profiles_[p];
+      for (auto i = profile.out_offsets_[to_idx(b)]; i != profile.out_offsets_[to_idx(b) + 1]; ++i) {
+        if (profile.out_edges_[i].target_ == c) {
+          found = true;
+          EXPECT_EQ(7_minutes, profile.out_edges_[i].duration_);
+        }
+      }
+      auto const expected = test.expected_ || (test.wheelchair_only_ && p != kWheelchairProfile);
+      EXPECT_EQ(expected, found);
+
+      // An independent maintained router must agree that the corresponding
+      // two-trip journey is permitted. RAPTOR expects closed transfer edges;
+      // add the independently known 3 + 4 minute path only for its input.
+      add(b, c, 7_minutes);
+      routing::query q;
+      q.start_time_ = unixtime_t{sys_days{2020_y / March / 30}};
+      q.start_.push_back(routing::offset{a, 0_minutes, 0});
+      q.destination_.push_back(routing::offset{d, 0_minutes, 0});
+      q.prf_idx_ = p;
+      auto const oracle = nigiri::test::raptor_search(tt, nullptr, q, direction::kForward);
+      EXPECT_EQ(expected, !oracle.empty());
+    }
+  }
 }
 
 TEST(routing, tad_ultra_builder_limit_validation) {
