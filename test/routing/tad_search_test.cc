@@ -1852,15 +1852,18 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
       routing::query q;
       q.start_time_ = unixtime_t{sys_days{2020_y / March / 30}} +
                       (dir == direction::kForward ? 0_hours : 6_hours);
-      q.start_.push_back(routing::offset{loc(c.from_), 0_minutes, 0});
-      q.destination_.push_back(routing::offset{loc(c.to_), 0_minutes, 0});
+      q.start_.push_back(routing::offset{
+          loc(dir == direction::kForward ? c.from_ : c.to_), 0_minutes, 0});
+      q.destination_.push_back(routing::offset{
+          loc(dir == direction::kForward ? c.to_ : c.from_), 0_minutes, 0});
       routing::search_state s_base, s_idx;
       routing::tad_state t_base, t_idx;
       auto const base_result = routing::tad_route(
           tt, nullptr, s_base, t_base, q, dir);
       auto const indexed_result = routing::tad_route(
           tt, nullptr, s_idx, t_idx, q, dir, std::nullopt, &idx);
-      ASSERT_FALSE(base_result.journeys_->empty());
+      EXPECT_FALSE(base_result.journeys_->empty());
+      if (base_result.journeys_->empty()) continue;
       EXPECT_EQ(base_result.journeys_->size(), indexed_result.journeys_->size());
       if (!indexed_result.journeys_->empty()) {
         EXPECT_EQ(base_result.journeys_->begin()->dest_time_,
