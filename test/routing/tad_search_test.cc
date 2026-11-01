@@ -19,6 +19,7 @@
 #include "nigiri/routing/transfer_time_settings.h"
 #include "../raptor_search.h"
 #include "nigiri/timetable.h"
+#include "nigiri/special_stations.h"
 #include "results_to_string.h"
 
 using namespace date;
@@ -1215,7 +1216,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   }
   EXPECT_TRUE(found_c_in_b);
 
-  // Verify un-contracted base footpath A -> D (120 min) is pruned.
+  // Conservative migration preserves the original long base footpath A -> D.
   auto const a_idx = cista::to_idx(loc_a);
   auto const a_start = ultra_idx_15.profiles_[0].out_offsets_[a_idx];
   auto const a_end = ultra_idx_15.profiles_[0].out_offsets_[a_idx + 1];
@@ -1231,7 +1232,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   auto const ultra_idx_5 = routing::build_tad_ultra_index(tt, 5);
   ASSERT_TRUE(ultra_idx_5.is_valid_for_query(profile_idx_t{0}));
 
-  // Verify intermediate footpath B -> X (3 min) is pruned.
+  // Conservative migration preserves B -> X even with a small candidate budget.
   auto const b_start_5 = ultra_idx_5.profiles_[0].out_offsets_[b_idx];
   auto const b_end_5 = ultra_idx_5.profiles_[0].out_offsets_[b_idx + 1];
   bool found_b_to_x_5 = false;
@@ -1925,6 +1926,7 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
   for (auto const& c : std::vector<scenario>{
            {"terminal_egress", first, "0000001", "0000004", 7_minutes},
            {"terminal_access", second, "0000002", "0000005", 7_minutes},
+           {"intermodal_access", second, "0000002", "0000005", 7_minutes},
            {"direct_walk", first, "0000002", "0000004", 7_minutes},
            {"long_intermediate", first + second, "0000001", "0000005", 16_minutes}}) {
     SCOPED_TRACE(c.name_);
@@ -1945,14 +1947,27 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
     tt.locations_.footpaths_in_[0][c_stop].push_back(footpath{b, c.walk_});
     auto const idx = routing::build_tad_ultra_index(tt, 15);
     for (auto const dir : {direction::kForward, direction::kBackward}) {
+      for (auto const expand : {false, true}) {
+      SCOPED_TRACE(expand ? "expanded" : "not_expanded");
       SCOPED_TRACE(dir == direction::kForward ? "forward" : "backward");
       routing::query q;
+      q.use_start_footpaths_ = expand;
       q.start_time_ = unixtime_t{sys_days{2020_y / March / 30}} +
                       (dir == direction::kForward ? 0_hours : 6_hours);
       q.start_.push_back(routing::offset{
           loc(dir == direction::kForward ? c.from_ : c.to_), 0_minutes, 0});
       q.destination_.push_back(routing::offset{
           loc(dir == direction::kForward ? c.to_ : c.from_), 0_minutes, 0});
+      auto const intermodal = std::string_view{c.name_} == "intermodal_access";
+      if (intermodal) {
+        if (dir == direction::kForward) {
+          q.start_match_mode_ = routing::location_match_mode::kIntermodal;
+          q.start_.front() = routing::offset{loc(c.from_), 10_minutes, 0};
+        } else {
+          q.dest_match_mode_ = routing::location_match_mode::kIntermodal;
+          q.destination_.front() = routing::offset{loc(c.from_), 10_minutes, 0};
+        }
+      }
       routing::search_state s_base, s_idx;
       routing::tad_state t_base, t_idx;
       auto const base_result = routing::tad_route(
@@ -1961,12 +1976,31 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
           tt, nullptr, s_idx, t_idx, q, dir, std::nullopt, &idx);
       EXPECT_FALSE(base_result.journeys_->empty());
       if (base_result.journeys_->empty()) continue;
+      for (auto const* result : {&base_result, &indexed_result}) {
+        if (result->journeys_->empty()) continue;
+        auto const& journey = *result->journeys_->begin();
+        ASSERT_FALSE(journey.legs_.empty());
+        EXPECT_EQ(intermodal ? get_special_station(special_station::kStart) : loc(c.from_),
+                  journey.legs_.front().from_);
+        if (intermodal) {
+          EXPECT_EQ(10_minutes, journey.legs_.front().arr_time_ - journey.legs_.front().dep_time_);
+          EXPECT_TRUE(std::holds_alternative<routing::offset>(journey.legs_.front().uses_));
+        }
+        EXPECT_EQ(loc(c.to_), journey.legs_.back().to_);
+        EXPECT_LE(journey.start_time_, journey.dest_time_);
+        if (dir == direction::kForward) {
+          EXPECT_GE(journey.start_time_, std::get<unixtime_t>(q.start_time_));
+        } else {
+          EXPECT_LE(journey.dest_time_, std::get<unixtime_t>(q.start_time_));
+        }
+      }
       EXPECT_EQ(base_result.journeys_->size(), indexed_result.journeys_->size());
       if (!indexed_result.journeys_->empty()) {
         EXPECT_EQ(base_result.journeys_->begin()->dest_time_,
                   indexed_result.journeys_->begin()->dest_time_);
         EXPECT_EQ(base_result.journeys_->begin()->start_time_,
                   indexed_result.journeys_->begin()->start_time_);
+      }
       }
     }
   }

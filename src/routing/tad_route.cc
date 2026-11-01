@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "nigiri/routing/tad/tad_route.h"
 #include "nigiri/routing/raptor_search.h"
 #include "nigiri/routing/tad/tad_search.h"
@@ -27,7 +28,13 @@ routing_result tad_route(
     tad_transfer_index const* transfer_index) {
     // These contracts are implemented by upstream RAPTOR. Scalar TAD has no
     // reservation/vehicle-wheelchair filter or RT-only journey reconstruction.
-    if (q.no_compulsory_reservation_ || q.prf_idx_ == kWheelchairProfile ||
+    auto const unsupported_backward_offsets = search_dir == direction::kBackward &&
+        (q.start_match_mode_ == location_match_mode::kIntermodal ||
+         q.dest_match_mode_ == location_match_mode::kIntermodal ||
+         !q.td_start_.empty() || !q.td_dest_.empty() ||
+         std::any_of(q.start_.begin(), q.start_.end(), [](auto const& o) { return o.duration() != 0_minutes; }) ||
+         std::any_of(q.destination_.begin(), q.destination_.end(), [](auto const& o) { return o.duration() != 0_minutes; }));
+    if (unsupported_backward_offsets || q.no_compulsory_reservation_ || q.prf_idx_ == kWheelchairProfile ||
         (rtt != nullptr && rtt->n_rt_transports() != 0U)) {
       raptor_state state;
       auto result = raptor_search(tt, rtt, s_state, state, q, search_dir, timeout);
@@ -88,6 +95,7 @@ routing_result tad_route(
         location_idx_t root_loc_;
         duration_t fp_dur_;
         duration_t combined_dur_;
+        offset root_offset_;
     };
     hash_map<location_idx_t, expanded_start_info> expanded_start_footpaths;
 
@@ -106,7 +114,7 @@ routing_result tad_route(
                         add_start_location(fp.target_, combined_dur);
                         auto const it = expanded_start_footpaths.find(fp.target_);
                         if (it == expanded_start_footpaths.end() || combined_dur < it->second.combined_dur_) {
-                            expanded_start_footpaths[fp.target_] = expanded_start_info{l, transfer_dur, combined_dur};
+                            expanded_start_footpaths[fp.target_] = expanded_start_info{l, transfer_dur, combined_dur, o};
                         }
                     }
                 }
@@ -486,13 +494,24 @@ routing_result tad_route(
 
             if (use_expanded_start) {
                 auto const& info = start_fp_it->second;
-                auto const core_dep = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
+                auto const& initial_state = K == 0 ? t_state : states[0];
+                auto const core_dep = j.legs_.empty()
+                    ? delta_to_unix(cur_search_base_date,
+                        initial_state.node_labels_[to_idx(start_loc)].arrival_time_)
+                    : j.legs_.front().dep_time_;
                 auto const walk_dur = std::chrono::minutes{info.fp_dur_.count()};
                 auto const walk_dep = core_dep - walk_dur;
                 j.legs_.insert(j.legs_.begin(), journey::leg{
                     direction::kForward, info.root_loc_, start_loc,
                     walk_dep, core_dep, footpath{start_loc, info.fp_dur_}
                 });
+                if (q.start_match_mode_ == location_match_mode::kIntermodal ||
+                    info.root_offset_.duration() != 0_minutes) {
+                    j.legs_.insert(j.legs_.begin(), journey::leg{
+                        direction::kForward, get_special_station(special_station::kStart),
+                        info.root_loc_, walk_dep - info.root_offset_.duration(), walk_dep,
+                        offset{info.root_loc_, info.root_offset_.duration(), info.root_offset_.mode()}});
+                }
             } else if (has_start_match) {
                 bool is_q_start = utl::any_of(q.start_, [&](offset const& o) { return matches(tt, q.start_match_mode_, o.target(), start_loc); });
                 if (q.start_match_mode_ == location_match_mode::kIntermodal || (!is_q_start && start_match.duration().count() > 0)) {
@@ -506,6 +525,18 @@ routing_result tad_route(
                 }
             }
             
+            if (!fwd) {
+                auto const it = expanded_start_footpaths.find(end_loc);
+                if (it != expanded_start_footpaths.end()) {
+                    auto const& info = it->second;
+                    auto const core_arr = j.legs_.empty() ? cur_query_time - info.fp_dur_
+                                                        : j.legs_.back().arr_time_;
+                    j.add(journey::leg{direction::kForward, end_loc, info.root_loc_,
+                                      core_arr, core_arr + info.fp_dur_,
+                                      footpath{info.root_loc_, info.fp_dur_}});
+                }
+            }
+
             bool is_q_dest = utl::any_of(q.destination_, [&](offset const& o) { return matches(tt, q.dest_match_mode_, o.target(), end_loc); });
             
             if (q.dest_match_mode_ == location_match_mode::kIntermodal || (!is_q_dest && dest_offset.duration().count() > 0)) {
