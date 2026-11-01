@@ -31,7 +31,7 @@ routing_result tad_route(
     auto const unsupported_backward_offsets = search_dir == direction::kBackward &&
         (q.start_match_mode_ == location_match_mode::kIntermodal ||
          q.dest_match_mode_ == location_match_mode::kIntermodal ||
-         !q.td_start_.empty() || !q.td_dest_.empty() ||
+         !q.td_start_.empty() || !q.td_dest_.empty() || !q.via_stops_.empty() ||
          std::any_of(q.start_.begin(), q.start_.end(), [](auto const& o) { return o.duration() != 0_minutes; }) ||
          std::any_of(q.destination_.begin(), q.destination_.end(), [](auto const& o) { return o.duration() != 0_minutes; }));
     if (unsupported_backward_offsets || q.no_compulsory_reservation_ || q.prf_idx_ == kWheelchairProfile ||
@@ -548,6 +548,21 @@ routing_result tad_route(
                 });
             }
             
+            // Backward labels carry latest feasible walking times. Return walks
+            // immediately after the preceding arrival, as upstream reconstruction
+            // does, rather than retaining artificial waits until the deadline.
+            // Backward via/TD-offset queries use RAPTOR above.
+            if (!fwd) {
+                for (std::size_t i = 1; i < j.legs_.size(); ++i) {
+                    auto& leg = j.legs_[i];
+                    if (std::holds_alternative<footpath>(leg.uses_)) {
+                        auto const duration = leg.arr_time_ - leg.dep_time_;
+                        leg.dep_time_ = j.legs_[i - 1].arr_time_;
+                        leg.arr_time_ = leg.dep_time_ + duration;
+                    }
+                }
+            }
+
             // Legs are chronological in both search directions. Upstream's
             // optimizer now accepts a physical origin-to-destination query.
             j.start_time_ = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
