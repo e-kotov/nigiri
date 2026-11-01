@@ -95,7 +95,7 @@ routing_result tad_route(
         location_idx_t root_loc_;
         duration_t fp_dur_;
         duration_t combined_dur_;
-        offset root_offset_;
+        offset root_offset_{location_idx_t::invalid(), duration_t{0}, 0};
     };
     hash_map<location_idx_t, expanded_start_info> expanded_start_footpaths;
 
