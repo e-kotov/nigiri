@@ -1971,3 +1971,52 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
     }
   }
 }
+
+TEST(routing, tad_ultra_transfer_graph_distance_invariant) {
+  constexpr auto src = source_idx_t{0U};
+  auto tt = timetable{};
+  tt.date_range_ = full_period();
+  auto ctx = import_context{tt};
+  register_special_stations(tt, ctx);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
+  finalize(tt, ctx);
+  auto const n = tt.n_locations();
+  auto const loc = [&](char const* id) { return tt.locations_.location_id_to_idx_.at({id, src}); };
+  auto const b = loc("0000002"), x = loc("0000003"), c = loc("0000004");
+  for (profile_idx_t p = 0; p < 2; ++p) {
+    tt.locations_.footpaths_out_[p].resize(n);
+    tt.locations_.footpaths_in_[p].resize(n);
+    for (auto const& edge : std::vector<std::tuple<location_idx_t, location_idx_t, duration_t>>{
+             {b, x, 3_minutes}, {x, c, 4_minutes}, {b, c, 16_minutes}, {c, b, 0_minutes}}) {
+      auto const [u, v, d] = edge;
+      tt.locations_.footpaths_out_[p][u].push_back(footpath{v, d});
+      tt.locations_.footpaths_in_[p][v].push_back(footpath{u, d});
+    }
+  }
+  auto const idx = routing::build_tad_ultra_index(tt, 5);
+  // Independent all-pairs oracle: every shortest transfer distance must survive
+  // for each profile and direction, even when witness generation misses an edge.
+  auto const distances = [&](routing::tad_transfer_provider const& provider, bool const fwd) {
+    auto d = std::vector<std::vector<int>>(n, std::vector<int>(n, 1000000));
+    for (unsigned u = 0; u < n; ++u) {
+      d[u][u] = 0;
+      std::vector<routing::tad_transfer_edge> edges;
+      provider.stop_transfers(location_idx_t{u}, fwd, edges);
+      for (auto const& edge : edges) {
+        auto const v = to_idx(edge.target_);
+        d[u][v] = std::min(d[u][v], static_cast<int>(edge.duration_.count()));
+      }
+    }
+    for (unsigned k = 0; k < n; ++k)
+      for (unsigned u = 0; u < n; ++u)
+        for (unsigned v = 0; v < n; ++v) d[u][v] = std::min(d[u][v], d[u][k] + d[k][v]);
+    return d;
+  };
+  for (profile_idx_t p = 0; p < 2; ++p) {
+    routing::footpath_transfer_provider base_provider{tt, p};
+    routing::shortcut_transfer_provider indexed_provider{idx.profiles_[p]};
+    for (auto const fwd : {true, false}) {
+      EXPECT_EQ(distances(base_provider, fwd), distances(indexed_provider, fwd));
+    }
+  }
+}

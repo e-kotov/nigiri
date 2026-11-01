@@ -95,6 +95,7 @@ TEST(routing, tad_rt_delay_parity) {
   timetable tt;
   tt.date_range_ = {date::sys_days{2019_y / March / 25}, date::sys_days{2019_y / November / 1}};
   auto ctx = import_context{tt};
+  register_special_stations(tt, ctx);
   load_timetable({}, source_idx_t{0}, test_files(), tt, ctx);
   finalize(tt, ctx);
   
@@ -141,6 +142,7 @@ TEST(routing, tad_rt_cancel_parity) {
   timetable tt;
   tt.date_range_ = {date::sys_days{2019_y / March / 25}, date::sys_days{2019_y / November / 1}};
   auto ctx = import_context{tt};
+  register_special_stations(tt, ctx);
   load_timetable({}, source_idx_t{0}, test_files(), tt, ctx);
   finalize(tt, ctx);
   
@@ -184,6 +186,7 @@ TEST(routing, tad_rt_added_trip_parity) {
   timetable tt;
   tt.date_range_ = {date::sys_days{2019_y / March / 25}, date::sys_days{2019_y / November / 1}};
   auto ctx = import_context{tt};
+  register_special_stations(tt, ctx);
   load_timetable({}, source_idx_t{0}, test_files(), tt, ctx);
   finalize(tt, ctx);
   
