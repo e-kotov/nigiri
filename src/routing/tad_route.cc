@@ -517,15 +517,13 @@ routing_result tad_route(
                 });
             }
             
-            if (fwd) {
-                j.start_time_ = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
-                j.dest_time_ = j.legs_.empty() ? cur_query_time : j.legs_.back().arr_time_;
-                optimize_footpaths(tt, rtt, q, j);
-            } else {
-                j.start_time_ = j.legs_.empty() ? cur_query_time : j.legs_.back().arr_time_;
-                j.dest_time_ = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
-                optimize_footpaths(tt, rtt, q, j);
-            }
+            // Legs are chronological in both search directions. Upstream's
+            // optimizer now accepts a physical origin-to-destination query.
+            j.start_time_ = j.legs_.empty() ? cur_query_time : j.legs_.front().dep_time_;
+            j.dest_time_ = j.legs_.empty() ? cur_query_time : j.legs_.back().arr_time_;
+            auto journey_q = q;
+            if (!fwd) journey_q.flip_dir();
+            optimize_footpaths(tt, rtt, journey_q, j);
             std::uint8_t num_routes = 0;
             for (auto const& leg : j.legs_) {
                 if (std::holds_alternative<journey::run_enter_exit>(leg.uses_)) {
