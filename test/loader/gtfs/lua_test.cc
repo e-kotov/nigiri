@@ -1,7 +1,6 @@
 #include "gtest/gtest.h"
 
 #include "nigiri/loader/gtfs/load_timetable.h"
-#include "nigiri/loader/init_finish.h"
 #include "nigiri/loader/load.h"
 
 #include "nigiri/rt/frun.h"
@@ -22,11 +21,11 @@ DB,Deutsche Bahn,https://deutschebahn.com,Europe/Paris
 TT,Tischtennis,https://deutschebahn.com,Europe/Paris
 
 # stops.txt
-stop_id,stop_name,stop_desc,stop_lat,stop_lon,stop_url,location_type,parent_station,platform_code
-A,A Berlin,i,0.0,1.0,,,,1
-B,B Berlin,j,2.0,3.0,,,,1
-C,C Berlin,k,4.0,5.0,,,,1
-D,D Berlin,l,6.0,7.0,,,,1
+stop_id,stop_name,stop_desc,stop_lat,stop_lon,stop_url,location_type,parent_station,platform_code,stop_code
+A,A Berlin,i,0.0,1.0,,,,1,SC_A
+B,B Berlin,j,2.0,3.0,,,,1,SC_B
+C,C Berlin,k,4.0,5.0,,,,1,SC_C
+D,D Berlin,l,6.0,7.0,,,,1,SC_D
 
 # calendar_dates.txt
 service_id,date,exception_type
@@ -78,6 +77,7 @@ function process_location(stop)
   stop:set_timezone('Europe/Berlin')
   stop:set_transfer_time(stop:get_transfer_time() + 98)
   stop:set_platform_code(stop:get_platform_code() .. 'A')
+  stop:set_stop_code(stop:get_stop_code() .. '_X')
 
   return true
 end
@@ -127,13 +127,12 @@ end
 }  // namespace
 
 TEST(gtfs, lua_test) {
-  auto tt = loader::load({{.tag_ = "test",
-                           .path_ = kTimetable,
-                           .loader_config_ = {.default_tz_ = "Europe/Berlin",
-                                              .user_script_ = kUserScript}}},
-                         {},
-                         {date::sys_days{2019_y / March / 25},
-                          date::sys_days{2019_y / November / 1}});
+  auto const tt =
+      loader::load({{.tag_ = "test",
+                     .path_ = kTimetable,
+                     .loader_config_ = {.default_tz_ = "Europe/Berlin",
+                                        .user_script_ = kUserScript}}},
+                   {}, {2019_y / March / 25, 2019_y / November / 1});
 
   auto const get_tz_name = [&](timezone_idx_t const tz) {
     return tt.timezones_[tz].apply(utl::overloaded{
@@ -162,6 +161,8 @@ TEST(gtfs, lua_test) {
   EXPECT_EQ(100min, tt.locations_.transfer_time_[*b]);
   EXPECT_EQ("1A",
             tt.get_default_translation(tt.locations_.platform_codes_[*b]));
+  EXPECT_EQ("SC_B_X",
+            tt.get_default_translation(tt.locations_.stop_codes_[*b]));
   EXPECT_EQ("Europe/Berlin",
             get_tz_name(tt.locations_.location_timezones_[*b]));
 

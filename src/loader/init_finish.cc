@@ -1,6 +1,6 @@
 #include "nigiri/loader/init_finish.h"
 
-#include <execution>
+#include <numeric>
 
 #include "utl/enumerate.h"
 
@@ -8,6 +8,8 @@
 
 #include "nigiri/loader/build_footpaths.h"
 #include "nigiri/loader/build_lb_graph.h"
+#include "nigiri/loader/compress_stop_times.h"
+#include "nigiri/loader/import_context.h"
 #include "nigiri/loader/register.h"
 #include "nigiri/flex.h"
 #include "nigiri/special_stations.h"
@@ -15,25 +17,27 @@
 
 namespace nigiri::loader {
 
-void register_special_stations(timetable& tt) {
+void register_special_stations(timetable& tt, import_context& ctx) {
   tt.languages_.store("");  // enable kDefaultLang
   tt.register_translation(std::string_view{""});  // enable kEmptyTranslation
   for (auto const& name : special_stations_names) {
     auto const name_translation = tt.register_translation(name);
-    register_location(tt, location{tt,
-                                   source_idx_t::invalid(),
-                                   name,
-                                   name_translation,
-                                   kEmptyTranslation,
-                                   kEmptyTranslation,
-                                   {0.0, 0.0},
-                                   location_type::kStation,
-                                   location_idx_t::invalid(),
-                                   timezone_idx_t::invalid(),
-                                   0_minutes});
+    register_location(tt, ctx,
+                      location{tt,
+                               source_idx_t::invalid(),
+                               name,
+                               name_translation,
+                               kEmptyTranslation,
+                               kEmptyTranslation,
+                               kEmptyTranslation,
+                               {0.0, 0.0},
+                               location_type::kStation,
+                               location_idx_t::invalid(),
+                               timezone_idx_t::invalid(),
+                               0_minutes});
   }
   tt.location_routes_.resize(tt.n_locations());
-  tt.bitfields_.emplace_back(bitfield{});  // bitfield_idx 0 = 000...00 bitfield
+  register_bitfield(tt, ctx, bitfield{});  // bitfield_idx 0 = 000...00 bitfield
   tt.attribute_combinations_.add_back_sized(0U);  // combination 0 = empty
 }
 
@@ -134,52 +138,137 @@ float contrast_ratio(color_t a, color_t b) {
 void correct_color_contrast(timetable& tt) {
   for (auto& ids : tt.route_ids_) {
     for (auto& colors : ids.route_id_colors_) {
-      auto const ratio = contrast_ratio(colors.color_, colors.text_color_);
+      constexpr auto white = color_t(0xFFFFFFFF);
+      constexpr auto black = color_t(0xFF000000);
 
-      if (ratio < 3.0f) {
-        constexpr auto white = color_t(0xFFFFFFFF);
-        constexpr auto black = color_t(0xFF000000);
-        auto const better = contrast_ratio(colors.color_, black) >
-                                    contrast_ratio(colors.color_, white)
-                                ? black
-                                : white;
-        colors.text_color_ = better;
+      if (colors.color_ != 0 && colors.text_color_ != 0) {
+        auto const ratio = contrast_ratio(colors.color_, colors.text_color_);
+
+        if (ratio < 2.0f) {
+          auto const better = contrast_ratio(colors.color_, black) >
+                                      contrast_ratio(colors.color_, white)
+                                  ? black
+                                  : white;
+          colors.text_color_ = better;
+        }
+      }
+
+      if (colors.color_ == 0 && colors.text_color_ != 0) {
+        colors.color_ = contrast_ratio(colors.text_color_, black) >
+                                contrast_ratio(colors.text_color_, white)
+                            ? black
+                            : white;
+      }
+
+      if (colors.color_ != 0 && colors.text_color_ == 0) {
+        colors.text_color_ = contrast_ratio(colors.color_, black) >
+                                     contrast_ratio(colors.color_, white)
+                                 ? black
+                                 : white;
       }
     }
   }
 }
 
-void finalize(timetable& tt, finalize_options const opt) {
+void rebuild_route_traffic_days(timetable& tt, import_context& ctx) {
+  tt.route_traffic_days_.resize(tt.n_routes());
+
+  for (auto r = route_idx_t{0U}; r != tt.n_routes(); ++r) {
+    auto combined = bitfield{};
+    auto const& seq = tt.route_location_seq_[r];
+    auto const stop_count = static_cast<stop_idx_t>(seq.size());
+
+    for (auto const t : tt.route_transport_ranges_[r]) {
+      auto max_delta = std::int16_t{0};
+      for (auto s = stop_idx_t{0U}; s != stop_count; ++s) {
+        if (s != 0U) {
+          max_delta = std::max(max_delta,
+                               tt.event_mam(r, t, s, event_type::kArr).days());
+        }
+        if (s + 1U != stop_count) {
+          max_delta = std::max(max_delta,
+                               tt.event_mam(r, t, s, event_type::kDep).days());
+        }
+      }
+
+      auto const& trans_bf = tt.bitfields_[tt.transport_traffic_days_[t]];
+      for (auto d = std::int16_t{0}; d <= max_delta; ++d) {
+        combined |= (trans_bf << static_cast<std::size_t>(d));
+      }
+    }
+
+    tt.route_traffic_days_[r] = register_bitfield(tt, ctx, combined);
+  }
+}
+
+void finalize(timetable& tt, import_context& ctx, finalize_options const& opt) {
   tt.location_routes_.resize(tt.n_locations());
 
   {
+    auto const timer = scoped_timer{"loader.compress_stop_times"};
+    compress_stop_times(tt, ctx);
+  }
+  {
+    auto const timer = scoped_timer{"loader.compact_trip_ids"};
+    tt.locations_.children_ = make_sparse_vecvec(ctx.children_);
+    for (auto const [src, trips] : utl::enumerate(ctx.route_id_trips_)) {
+      tt.route_ids_[source_idx_t{src}].route_id_trips_ =
+          cista::raw::make_vecvec(trips);
+    }
+    tt.location_group_locations_ =
+        cista::raw::make_vecvec(ctx.location_group_locations_);
+    tt.location_location_groups_ =
+        make_sparse_vecvec(ctx.location_location_groups_);
+    tt.location_group_transports_ =
+        cista::raw::make_vecvec(ctx.location_group_transports_);
+    tt.flex_area_transports_ =
+        cista::raw::make_vecvec(ctx.flex_area_transports_);
+    tt.location_areas_ = make_sparse_vecvec(ctx.location_areas_);
+    tt.location_ticketing_identifier_ =
+        make_sparse_vecvec(ctx.location_ticketing_identifier_);
+    tt.trip_ticketing_identifier_ =
+        make_sparse_vecvec(ctx.trip_ticketing_identifier_);
+    tt.trip_stop_seq_numbers_ =
+        make_sparse_vecvec(std::move(ctx.trip_stop_seq_numbers_));
+    ctx.children_ = {};
+    ctx.route_id_trips_ = {};
+    ctx.location_group_locations_ = {};
+    ctx.location_location_groups_ = {};
+    ctx.location_group_transports_ = {};
+    ctx.flex_area_transports_ = {};
+    ctx.location_areas_ = {};
+    ctx.location_ticketing_identifier_ = {};
+    ctx.trip_ticketing_identifier_ = {};
+  }
+  {
     auto const timer = scoped_timer{"loader.sort_trip_ids"};
+    tt.trip_id_to_idx_.resize(tt.n_trips());
+    std::iota(begin(tt.trip_id_to_idx_), end(tt.trip_id_to_idx_),
+              trip_idx_t{0U});
     std::sort(
-#if __cpp_lib_execution
-        std::execution::par_unseq,
-#endif
         begin(tt.trip_id_to_idx_), end(tt.trip_id_to_idx_),
-        [&](pair<trip_id_idx_t, trip_idx_t> const& a,
-            pair<trip_id_idx_t, trip_idx_t> const& b) {
-          return std::tuple{tt.trip_id_src_[a.first],
-                            tt.trip_id_strings_[a.first].view()} <
-                 std::tuple{tt.trip_id_src_[b.first],
-                            tt.trip_id_strings_[b.first].view()};
+        [&](trip_idx_t const a, trip_idx_t const b) {
+          return std::tuple{tt.trip_id_src_[a], tt.trip_id_strings_[a].view()} <
+                 std::tuple{tt.trip_id_src_[b], tt.trip_id_strings_[b].view()};
         });
   }
   {
     auto const timer = scoped_timer{"loader.sort_providers"};
-    std::sort(
-#if __cpp_lib_execution
-        std::execution::par_unseq,
-#endif
-        begin(tt.provider_id_to_idx_), end(tt.provider_id_to_idx_),
-        [&](provider_idx_t const a, provider_idx_t const b) {
-          return std::tie(tt.providers_[a].src_, tt.providers_[a].id_) <
-                 std::tie(tt.providers_[b].src_, tt.providers_[b].id_);
-        });
+    std::sort(begin(tt.provider_id_to_idx_), end(tt.provider_id_to_idx_),
+              [&](provider_idx_t const a, provider_idx_t const b) {
+                return std::tie(tt.providers_[a].src_, tt.providers_[a].id_) <
+                       std::tie(tt.providers_[b].src_, tt.providers_[b].id_);
+              });
   }
-  build_footpaths(tt, opt);
+  build_footpaths(tt, ctx, opt);
+  {
+    auto const timer = scoped_timer{"loader.compact_trip_transport_ranges"};
+    tt.trip_transport_ranges_ = make_sparse_vecvec(ctx.trip_transport_ranges_);
+    tt.locations_.equivalences_ = cista::raw::make_vecvec(ctx.equivalences_);
+    ctx.trip_transport_ranges_ = {};
+    ctx.equivalences_ = {};
+  }
+  rebuild_route_traffic_days(tt, ctx);
   build_lb_graph<direction::kForward>(tt, kDefaultProfile);
   build_lb_graph<direction::kBackward>(tt, kDefaultProfile);
   build_location_tree(tt);
@@ -193,12 +282,14 @@ void finalize(timetable& tt, finalize_options const opt) {
 }
 
 void finalize(timetable& tt,
+              import_context& ctx,
               bool const adjust_footpaths,
               bool const merge_dupes_intra_src,
               bool const merge_dupes_inter_src,
               std::uint16_t const max_footpath_length) {
-  finalize(tt, {adjust_footpaths, merge_dupes_intra_src, merge_dupes_inter_src,
-                max_footpath_length});
+  finalize(tt, ctx,
+           {adjust_footpaths, merge_dupes_intra_src, merge_dupes_inter_src,
+            max_footpath_length});
 }
 
 }  // namespace nigiri::loader

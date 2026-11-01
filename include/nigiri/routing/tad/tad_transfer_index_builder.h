@@ -26,7 +26,7 @@ inline tad_transfer_index build_tad_transfer_index(timetable const& tt) {
   idx.profiles_.resize(n_profiles);
 
   auto constexpr kInfDuration = i32_minutes{std::numeric_limits<std::int32_t>::max()};
-  auto constexpr kMaxShortcutDuration = i32_minutes{std::numeric_limits<std::int16_t>::max()};
+  auto constexpr kMaxShortcutDuration = i32_minutes{footpath::kMaxDuration.count()};
 
   for (profile_idx_t prf = 0; prf < n_profiles; ++prf) {
     auto& prf_shortcuts = idx.profiles_[cista::to_idx(prf)];
@@ -151,6 +151,7 @@ inline tad_transfer_index build_tad_transfer_index(timetable const& tt) {
     }
   }
 
+  idx.validate_structure();
   return idx;
 }
 

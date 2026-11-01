@@ -5,7 +5,9 @@
 #include <queue>
 #include <vector>
 
+#ifndef NIGIRI_TAD_PROFILING
 #define NIGIRI_TAD_PROFILING 0
+#endif
 #include <stdexcept>
 
 #include "nigiri/routing/get_earliest_transport.h"
@@ -312,7 +314,7 @@ private:
             bitfield_idx_t bf_idx;
             if (rtt_ != nullptr) {
                 bf_idx = rtt_->transport_traffic_days_[t];
-                if ((rtt_->bitfields_[bf_idx] & search_mask_).any()) { active = true; break; }
+                if ((rtt_->traffic_days(bf_idx) & search_mask_).any()) { active = true; break; }
             } else {
                 bf_idx = tt_.transport_traffic_days_[t];
                 if ((tt_.bitfields_[bf_idx] & search_mask_).any()) { active = true; break; }
@@ -328,12 +330,12 @@ private:
           !is_allowed(allowed_claszes_, tt_.route_clasz_[r])) {
         continue;
       }
-      if (require_bike_ && !tt_.route_bikes_allowed_.test(r_idx * 2) &&
-          !tt_.route_bikes_allowed_.test(r_idx * 2 + 1)) {
+      if (require_bike_ && !tt_.route_flags_[route_flag::kBikesAllowed].test(r_idx * 2) &&
+          !tt_.route_flags_[route_flag::kBikesAllowed].test(r_idx * 2 + 1)) {
         continue;
       }
-      if (require_car_ && !tt_.route_cars_allowed_.test(r_idx * 2) &&
-          !tt_.route_cars_allowed_.test(r_idx * 2 + 1)) {
+      if (require_car_ && !tt_.route_flags_[route_flag::kCarsAllowed].test(r_idx * 2) &&
+          !tt_.route_flags_[route_flag::kCarsAllowed].test(r_idx * 2 + 1)) {
         continue;
       }
       ++stats_.scanned_routes_;
@@ -400,14 +402,14 @@ private:
 
     for (unsigned target_idx = stop_idx + 1; target_idx < stop_seq.size(); ++target_idx) {
       ++stats_.scanned_stop_events_;
-      if (require_bike_ && !tt_.route_bikes_allowed_per_section_.empty() &&
-          !tt_.route_bikes_allowed_per_section_[r].empty() &&
-          !tt_.route_bikes_allowed_per_section_[r][target_idx - 1]) {
+      if (require_bike_ && !tt_.route_flags_per_section_[route_flag::kBikesAllowed].empty() &&
+          !tt_.route_flags_per_section_[route_flag::kBikesAllowed][r].empty() &&
+          !tt_.route_flags_per_section_[route_flag::kBikesAllowed][r][target_idx - 1]) {
         break;
       }
-      if (require_car_ && !tt_.route_cars_allowed_per_section_.empty() &&
-          !tt_.route_cars_allowed_per_section_[r].empty() &&
-          !tt_.route_cars_allowed_per_section_[r][target_idx - 1]) {
+      if (require_car_ && !tt_.route_flags_per_section_[route_flag::kCarsAllowed].empty() &&
+          !tt_.route_flags_per_section_[route_flag::kCarsAllowed][r].empty() &&
+          !tt_.route_flags_per_section_[route_flag::kCarsAllowed][r][target_idx - 1]) {
         break;
       }
       auto const target_stp = stop(stop_seq[target_idx]);
@@ -465,14 +467,14 @@ private:
     for (auto target_idx = static_cast<int>(stop_idx) - 1; target_idx >= 0; --target_idx) {
       ++stats_.scanned_stop_events_;
       auto const section_idx = static_cast<unsigned>(target_idx);
-      if (require_bike_ && !tt_.route_bikes_allowed_per_section_.empty() &&
-          !tt_.route_bikes_allowed_per_section_[r].empty() &&
-          !tt_.route_bikes_allowed_per_section_[r][section_idx]) {
+      if (require_bike_ && !tt_.route_flags_per_section_[route_flag::kBikesAllowed].empty() &&
+          !tt_.route_flags_per_section_[route_flag::kBikesAllowed][r].empty() &&
+          !tt_.route_flags_per_section_[route_flag::kBikesAllowed][r][section_idx]) {
         break;
       }
-      if (require_car_ && !tt_.route_cars_allowed_per_section_.empty() &&
-          !tt_.route_cars_allowed_per_section_[r].empty() &&
-          !tt_.route_cars_allowed_per_section_[r][section_idx]) {
+      if (require_car_ && !tt_.route_flags_per_section_[route_flag::kCarsAllowed].empty() &&
+          !tt_.route_flags_per_section_[route_flag::kCarsAllowed][r].empty() &&
+          !tt_.route_flags_per_section_[route_flag::kCarsAllowed][r][section_idx]) {
         break;
       }
       auto const target_stp = stop(stop_seq[static_cast<unsigned>(target_idx)]);
@@ -510,15 +512,15 @@ private:
         continue;
       }
       if (require_bike_) {
-        auto const bikes_all = rtt_->rt_transport_bikes_allowed_.test(rt_t_idx * 2);
-        auto const bikes_some = rtt_->rt_transport_bikes_allowed_.test(rt_t_idx * 2 + 1);
+        auto const bikes_all = rtt_->rt_transport_flags_[route_flag::kBikesAllowed].test(rt_t_idx * 2);
+        auto const bikes_some = rtt_->rt_transport_flags_[route_flag::kBikesAllowed].test(rt_t_idx * 2 + 1);
         if (!bikes_all && !bikes_some) {
           continue;
         }
       }
       if (require_car_) {
-        auto const cars_all = rtt_->rt_transport_cars_allowed_.test(rt_t_idx * 2);
-        auto const cars_some = rtt_->rt_transport_cars_allowed_.test(rt_t_idx * 2 + 1);
+        auto const cars_all = rtt_->rt_transport_flags_[route_flag::kCarsAllowed].test(rt_t_idx * 2);
+        auto const cars_some = rtt_->rt_transport_flags_[route_flag::kCarsAllowed].test(rt_t_idx * 2 + 1);
         if (!cars_all && !cars_some) {
           continue;
         }
@@ -612,10 +614,10 @@ private:
 
     for (unsigned target_idx = stop_idx + 1; target_idx < stop_seq.size(); ++target_idx) {
       ++stats_.scanned_stop_events_;
-      if (require_bike_ && !rtt_->rt_transport_bikes_allowed_.test(rt_t_idx * 2)) {
+      if (require_bike_ && !rtt_->rt_transport_flags_[route_flag::kBikesAllowed].test(rt_t_idx * 2)) {
         break;
       }
-      if (require_car_ && !rtt_->rt_transport_cars_allowed_.test(rt_t_idx * 2)) {
+      if (require_car_ && !rtt_->rt_transport_flags_[route_flag::kCarsAllowed].test(rt_t_idx * 2)) {
         break;
       }
       auto const target_stp = stop(stop_seq[target_idx]);
@@ -656,10 +658,10 @@ private:
 
     for (auto target_idx = static_cast<int>(stop_idx) - 1; target_idx >= 0; --target_idx) {
       ++stats_.scanned_stop_events_;
-      if (require_bike_ && !rtt_->rt_transport_bikes_allowed_.test(rt_t_idx * 2)) {
+      if (require_bike_ && !rtt_->rt_transport_flags_[route_flag::kBikesAllowed].test(rt_t_idx * 2)) {
         break;
       }
-      if (require_car_ && !rtt_->rt_transport_cars_allowed_.test(rt_t_idx * 2)) {
+      if (require_car_ && !rtt_->rt_transport_flags_[route_flag::kCarsAllowed].test(rt_t_idx * 2)) {
         break;
       }
       auto const target_stp = stop(stop_seq[static_cast<unsigned>(target_idx)]);

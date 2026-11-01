@@ -70,7 +70,7 @@ struct tad_ultra_builder {
 
     for (profile_idx_t prf = 0; prf < kNProfiles; ++prf) {
       auto& prf_shortcuts = idx.profiles_[cista::to_idx(prf)];
-      prf_shortcuts.transfer_time_fingerprint_ = "ultra_witness_shortcuts_v1";
+      prf_shortcuts.transfer_time_fingerprint_ = "ultra_conservative_shortcuts_v2";
 
       auto const grouping = build_station_grouping(tt_, prf);
 
@@ -107,6 +107,9 @@ struct tad_ultra_builder {
       }
 
       run_witness_search(prf, grouping, out_shortcuts);
+      // Transit witnesses select optional candidates until buffer, permission
+      // and station semantics are qualified. Never prune the original graph.
+      verify_and_preserve_footpaths(prf, out_shortcuts);
 
       prf_shortcuts.out_offsets_.resize(n_locs + 1U, 0U);
       for (std::size_t i = 0; i < n_locs; ++i) {
@@ -141,10 +144,57 @@ struct tad_ultra_builder {
       }
     }
 
+    idx.validate_structure();
     return idx;
   }
 
 private:
+  void verify_and_preserve_footpaths(
+      profile_idx_t const prf,
+      std::vector<std::map<location_idx_t, duration_t>>& candidates) const {
+    auto const& graph = tt_.locations_.footpaths_out_[prf];
+    auto const inf = std::numeric_limits<int>::max();
+    using entry = std::pair<int, location_idx_t>;
+    for (std::size_t source = 0; source < candidates.size(); ++source) {
+      auto& edges = candidates[source];
+      if (!edges.empty()) {
+        std::vector<int> distance(tt_.n_locations(), inf);
+        std::priority_queue<entry, std::vector<entry>, std::greater<>> queue;
+        auto const src = location_idx_t{static_cast<std::uint32_t>(source)};
+        distance[source] = 0;
+        queue.emplace(0, src);
+        while (!queue.empty()) {
+          auto const [d, u] = queue.top(); queue.pop();
+          if (d != distance[to_idx(u)] || to_idx(u) >= graph.size()) continue;
+          for (auto const& edge : graph[u]) {
+            auto const v = edge.target();
+            auto const next = d + edge.duration().count();
+            if (to_idx(v) < distance.size() && next <= footpath::kMaxDuration.count() &&
+                next < distance[to_idx(v)]) {
+              distance[to_idx(v)] = next;
+              queue.emplace(next, v);
+            }
+          }
+        }
+        for (auto it = edges.begin(); it != edges.end();) {
+          auto const target = to_idx(it->first);
+          if (target >= distance.size() || distance[target] == inf) {
+            it = edges.erase(it);
+          } else {
+            it->second = duration_t{static_cast<std::int16_t>(distance[target])};
+            ++it;
+          }
+        }
+      }
+      if (source < graph.size()) {
+        for (auto const& edge : graph[location_idx_t{static_cast<std::uint32_t>(source)}]) {
+          auto const [it, inserted] = edges.emplace(edge.target(), edge.duration());
+          if (!inserted) it->second = std::min(it->second, edge.duration());
+        }
+      }
+    }
+  }
+
   void run_witness_search(
       profile_idx_t const prf,
       station_grouping const& grouping,

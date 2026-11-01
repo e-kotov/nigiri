@@ -1,9 +1,11 @@
 #pragma once
 
-#include <vector>
 #include <algorithm>
+#include <stdexcept>
+#include <vector>
 
 #include "nigiri/routing/journey.h"
+#include "nigiri/routing/transfer_time_settings.h"
 #include "nigiri/routing/tad/tad_state.h"
 #include "nigiri/timetable.h"
 

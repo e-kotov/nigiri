@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <chrono>
 #include <cinttypes>
 #include <variant>
@@ -164,17 +165,22 @@ using mm_paged_vecvec = mm_paged_vecvec_helper<Key, T>::type;
 using translation_idx_t = cista::strong<std::uint32_t, struct _translation_idx>;
 using string_idx_t = cista::strong<std::uint32_t, struct _string_idx>;
 using bitfield_idx_t = cista::strong<std::uint32_t, struct _bitfield_idx>;
+
+constexpr auto const kEmptyBitfieldIdx = bitfield_idx_t{0U};
+
 using location_idx_t = cista::strong<std::uint32_t, struct _location_idx>;
 using route_idx_t = cista::strong<std::uint32_t, struct _route_idx>;
 using section_idx_t = cista::strong<std::uint32_t, struct _section_idx>;
 using section_db_idx_t = cista::strong<std::uint32_t, struct _section_db_idx>;
 using shape_idx_t = cista::strong<std::uint32_t, struct _shape_idx>;
+using scoped_shape_idx_t =
+    cista::strong<std::uint32_t, struct _scoped_shape_idx>;
 using shape_offset_t = cista::strong<std::uint32_t, struct _shape_offset>;
 using shape_offset_idx_t =
     cista::strong<std::uint32_t, struct _shape_offset_idx>;
 using trip_idx_t = cista::strong<std::uint32_t, struct _trip_idx>;
 using route_id_idx_t = cista::strong<std::uint32_t, struct _route_id_idx>;
-using trip_id_idx_t = cista::strong<std::uint32_t, struct _trip_id_str_idx>;
+using category_idx_t = cista::strong<std::uint32_t, struct _category_idx>;
 using transport_idx_t = cista::strong<std::uint32_t, struct _transport_idx>;
 using source_idx_t = cista::strong<std::uint16_t, struct _source_idx>;
 using day_idx_t = cista::strong<std::uint16_t, struct _day_idx>;
@@ -215,6 +221,7 @@ using rt_merged_trips_idx_t =
     cista::strong<std::uint32_t, struct _merged_trips_idx>;
 using rt_transport_direction_string_idx_t =
     cista::strong<std::uint32_t, struct _rt_transport_direction_string>;
+using track_idx_t = cista::strong<std::uint32_t, struct _track_idx>;
 
 using line_id_t = string;
 
@@ -235,6 +242,15 @@ using flex_stop_seq_idx_t =
     cista::strong<std::uint32_t, struct _flex_stop_seq_idx>;
 
 using transport_range_t = pair<transport_idx_t, interval<stop_idx_t>>;
+
+using ticketing_link_idx_t =
+    cista::strong<std::uint32_t, struct _ticketing_link_idx>;
+
+struct category {
+  string_idx_t id_;
+  translation_idx_t name_;
+  translation_idx_t short_name_;
+};
 
 struct translation {
   translation() = default;
@@ -270,10 +286,11 @@ struct attribute {
 
 struct provider {
   CISTA_COMPARABLE()
-  CISTA_PRINTABLE(provider, "short_name", "long_name", "url")
+  CISTA_PRINTABLE(provider, "short_name", "long_name", "url", "fare_url")
   string_idx_t id_;
-  translation_idx_t name_, url_;
+  translation_idx_t name_, url_, fare_url_;
   timezone_idx_t tz_{timezone_idx_t::invalid()};
+  ticketing_link_idx_t ticketing_link_;
   source_idx_t src_;
 };
 
@@ -382,7 +399,7 @@ enum class clasz : std::uint8_t {
   kLongDistance = 2,
   kCoach = 3,
   kNight = 4,
-  kRegionalFast = 5,
+  kRideSharing = 5,
   kRegional = 6,
   kSuburban = 7,
   kSubway = 8,
@@ -399,12 +416,20 @@ enum class clasz : std::uint8_t {
 constexpr auto const kNumClasses =
     static_cast<std::underlying_type_t<clasz>>(clasz::kNumClasses);
 
+enum route_flag : std::uint8_t {
+  kBikesAllowed = 0,
+  kCarsAllowed = 1,
+  kWheelchairAccessible = 2,
+  kReservationNotRequired = 3,
+  kNumRouteFlags
+};
+
 constexpr std::string_view to_str(clasz const c) {
   constexpr auto const clasz_str =
-      std::array{"AIR",    "HIGHSPEED",     "LONG_DISTANCE", "COACH",
-                 "NIGHT",  "REGIONAL_FAST", "REGIONAL",      "SUBURBAN",
-                 "SUBWAY", "TRAM",          "BUS",           "SHIP",
-                 "ODM",    "FUNICULAR",     "AERIAL_LIFT",   "OTHER"};
+      std::array{"AIR",    "HIGHSPEED",    "LONG_DISTANCE", "COACH",
+                 "NIGHT",  "RIDE_SHARING", "REGIONAL",      "SUBURBAN",
+                 "SUBWAY", "TRAM",         "BUS",           "SHIP",
+                 "ODM",    "FUNICULAR",    "AERIAL_LIFT",   "OTHER"};
   return clasz_str[static_cast<unsigned>(c)];
 }
 
@@ -424,6 +449,12 @@ inline std::string_view to_str(event_type const d) {
   return d == event_type::kArr ? "ARR" : "DEP";
 }
 
+constexpr unsigned event_idx(stop_idx_t const stop_idx,
+                             event_type const ev_type) {
+  return static_cast<unsigned>(stop_idx * 2 -
+                               (ev_type == event_type::kArr ? 1 : 0));
+}
+
 enum class direction {
   kForward,
   kBackward  // start = final arrival, destination = journey departure
@@ -431,6 +462,11 @@ enum class direction {
 
 inline constexpr direction flip(direction const d) noexcept {
   return d == direction::kForward ? direction::kBackward : direction::kForward;
+}
+
+template <direction Dir>
+constexpr direction flip(direction const dir) {
+  return Dir == direction::kForward ? dir : flip(dir);
 }
 
 inline std::string_view to_str(direction const d) {
@@ -446,8 +482,6 @@ auto to_range(Collection const& c) {
   }
 }
 
-using transport_mode_id_t = std::uint32_t;
-
 using via_offset_t = std::uint8_t;
 
 template <typename T>
@@ -458,6 +492,35 @@ enum class shape_source : std::uint8_t {
   kTimetable = 1,
   kRouted = 2
 };
+
+constexpr auto const kShapeSourceBit = std::uint32_t{1U} << 31U;
+constexpr auto const kShapeIndexMask = kShapeSourceBit - 1U;
+
+inline shape_source get_shape_source(scoped_shape_idx_t const idx) {
+  if (idx == scoped_shape_idx_t::invalid()) {
+    return shape_source::kNone;
+  }
+  return (to_idx(idx) & kShapeSourceBit) != 0U ? shape_source::kRouted
+                                               : shape_source::kTimetable;
+}
+
+inline shape_idx_t get_local_shape_idx(scoped_shape_idx_t const idx) {
+  return idx == scoped_shape_idx_t::invalid()
+             ? shape_idx_t::invalid()
+             : shape_idx_t{to_idx(idx) & kShapeIndexMask};
+}
+
+inline scoped_shape_idx_t to_scoped_shape_idx(shape_idx_t const local_idx,
+                                              shape_source const source) {
+  if (local_idx == shape_idx_t::invalid() || source == shape_source::kNone) {
+    return scoped_shape_idx_t::invalid();
+  }
+  auto const local = to_idx(local_idx);
+  assert((local & kShapeSourceBit) == 0U);
+  return scoped_shape_idx_t{
+      local |
+      (source == shape_source::kRouted ? kShapeSourceBit : std::uint32_t{0U})};
+}
 
 }  // namespace nigiri
 
@@ -510,6 +573,8 @@ inline std::ostream& operator<<(std::ostream& out,
 namespace nigiri {
 
 struct delta {
+  delta() = default;
+
   explicit delta(duration_t const d)
       : days_{static_cast<std::uint16_t>(d.count() / 1440)},
         mam_{static_cast<std::uint16_t>(d.count() % 1440)} {
@@ -520,7 +585,7 @@ struct delta {
       : days_{static_cast<std::uint16_t>(minutes / 1440U)},
         mam_{static_cast<std::uint16_t>(minutes % 1440U)} {}
 
-  delta(std::uint16_t const day, std::uint16_t const mam)
+  constexpr delta(std::uint16_t const day, std::uint16_t const mam)
       : days_{day}, mam_{mam} {}
 
   delta(date::days const day_offset, duration_t const minutes_offset)
@@ -536,8 +601,8 @@ struct delta {
     return *reinterpret_cast<std::uint16_t const*>(this);
   }
 
-  std::int16_t days() const { return days_; }
-  std::int16_t mam() const { return mam_; }
+  constexpr std::int16_t days() const { return days_; }
+  constexpr std::int16_t mam() const { return mam_; }
 
   friend std::ostream& operator<<(std::ostream& out, delta const& d) {
     return out << duration_t{static_cast<duration_t::rep>(d.mam_)} << "."
@@ -549,17 +614,27 @@ struct delta {
                                             (a.mam_ - b.mam_))};
   }
 
+  friend constexpr delta operator+(delta const a, delta const b) {
+    auto const mam = static_cast<std::uint16_t>(a.mam_ + b.mam_);
+    auto const days = static_cast<std::uint16_t>(a.days_ + b.days_);
+    return mam >= 1440U ? delta{static_cast<std::uint16_t>(days + 1U),
+                                static_cast<std::uint16_t>(mam - 1440U)}
+                        : delta{days, mam};
+  }
+
   cista::hash_t hash() const {
     return cista::hash_combine(cista::BASE_HASH, value());
   }
 
-  duration_t as_duration() const { return days() * 1_days + mam() * 1_minutes; }
+  constexpr duration_t as_duration() const {
+    return days() * 1_days + mam() * 1_minutes;
+  }
 
   std::pair<date::days, duration_t> to_offset() const {
     return {date::days{days() - 1}, duration_t{mam() - 720}};
   }
 
-  std::int16_t count() const { return days_ * 1440U + mam_; }
+  constexpr std::int16_t count() const { return days_ * 1440U + mam_; }
 
   friend bool operator<(delta const a, delta const b) {
     return a.value() < b.value();

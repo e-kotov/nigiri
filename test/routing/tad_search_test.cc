@@ -2,6 +2,7 @@
 
 #include "nigiri/loader/hrd/load_timetable.h"
 #include "nigiri/loader/init_finish.h"
+#include "nigiri/loader/import_context.h"
 
 #include "../loader/hrd/hrd_timetable.h"
 
@@ -109,9 +110,10 @@ loader::mem_dir custom_hrd(std::string const& services) {
 TEST(routing, tad_forward_basic) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const start_time = unixtime_t{sys_days{2020_y / March / 30}} + 5_hours;
   verify_tad_raptor_equivalence(tt, "0000001", "0000003", start_time);
@@ -133,9 +135,10 @@ TEST(routing, tad_rejected_transfer) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   auto const start_0 = unixtime_t{sys_days{2020_y / March / 30}} + 0_hours;
   verify_tad_raptor_equivalence(tt, "0000001", "0000003", start_0);
@@ -162,9 +165,10 @@ TEST(routing, tad_later_first_leg) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   verify_tad_raptor_equivalence(tt, "0000001", "0000003", unixtime_t{sys_days{2020_y / March / 30}});
 }
@@ -195,9 +199,10 @@ TEST(routing, tad_unlimited_transfers) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   verify_tad_raptor_equivalence(tt, "0000001", "0000005", unixtime_t{sys_days{2020_y / March / 30}});
 }
@@ -218,9 +223,10 @@ TEST(routing, tad_no_route) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   verify_tad_raptor_equivalence(tt, "0000001", "0000004", unixtime_t{sys_days{2020_y / March / 30}});
 }
@@ -241,6 +247,7 @@ TEST(routing, tad_walking_transfer_improvement) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
   
   constexpr auto const footpaths = R"(
@@ -252,8 +259,8 @@ TEST(routing, tad_walking_transfer_improvement) {
   dir.add({loader::hrd::hrd_5_20_26.fplan_ / "services.101", services});
   dir.dir_[loader::hrd::hrd_5_20_26.core_data_ / loader::hrd::hrd_5_20_26.required_files_[loader::hrd::FOOTPATHS][0]] = footpaths;
 
-  load_timetable(src, loader::hrd::hrd_5_20_26, dir, tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, dir, tt, ctx);
+  finalize(tt, ctx);
   
   verify_tad_raptor_equivalence(tt, "0000001", "0000006", unixtime_t{sys_days{2020_y / March / 30}});
   
@@ -308,9 +315,10 @@ TEST(routing, tad_deterministic_equal_time) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   verify_tad_raptor_equivalence(tt, "0000001", "0000003", unixtime_t{sys_days{2020_y / March / 30}});
   
@@ -352,9 +360,10 @@ TEST(routing, tad_same_station) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   routing::transfer_time_settings tts;
   routing::tad_state state;
@@ -391,9 +400,10 @@ TEST(routing, tad_zero_duration_transfer) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   // Set transfer time for B to 0 to test zero-duration transfers
   auto const b_it = tt.locations_.location_id_to_idx_.find({"0000002", src});
@@ -450,9 +460,10 @@ TEST(routing, tad_multi_day) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   verify_tad_raptor_equivalence(tt, "0000001", "0000003", unixtime_t{sys_days{2020_y / March / 30}} + 23_hours + 40_minutes);
 }
@@ -478,9 +489,10 @@ TEST(routing, tad_multiple_starts_and_destinations) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   auto const start_it = tt.locations_.location_id_to_idx_.find({"0000001", src});
   ASSERT_NE(start_it, tt.locations_.location_id_to_idx_.end());
@@ -545,9 +557,10 @@ TEST(routing, tad_coordinate_offsets) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000002", src});
@@ -607,9 +620,10 @@ TEST(routing, tad_multiple_td_offsets) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   auto const start_loc_1 = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const start_loc_2 = tt.locations_.location_id_to_idx_.at({"0000002", src});
@@ -655,9 +669,10 @@ TEST(routing, tad_time_varying_offsets) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000002", src});
@@ -704,9 +719,10 @@ TEST(routing, tad_mixed_static_td_offsets) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(services), tt, ctx);
+  finalize(tt, ctx);
   
   auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000002", src});
@@ -743,6 +759,7 @@ TEST(routing, tad_mixed_static_td_offsets) {
 
 TEST(routing, tad_reconstruct_parent_cycle_guard) {
   timetable tt;
+  import_context ctx{tt};
   routing::transfer_time_settings tts;
   routing::tad_state state;
   state.resize(3U, 0U, 1U);
@@ -773,9 +790,10 @@ TEST(routing, tad_reconstruct_parent_cycle_guard) {
 TEST(routing, tad_adversarial_class_filter) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
@@ -799,9 +817,10 @@ TEST(routing, tad_adversarial_class_filter) {
 TEST(routing, tad_max_transfers_post_reconstruction_limitation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000004", src});
@@ -823,9 +842,10 @@ TEST(routing, tad_max_transfers_post_reconstruction_limitation) {
 TEST(routing, tad_interval_early_stop) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const dest_loc = tt.locations_.location_id_to_idx_.at({"0000003", src});
@@ -849,9 +869,10 @@ TEST(routing, tad_interval_early_stop) {
 TEST(routing, tad_via_leg_destination_node_propagation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const start_loc = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const via_loc = tt.locations_.location_id_to_idx_.at({"0000002", src});
@@ -889,6 +910,7 @@ TEST(routing, tad_shortcut_transfer_provider) {
   }
   prf.out_edges_.push_back(routing::tad_transfer_edge{location_idx_t{2}, duration_t{5}});
 
+  ASSERT_TRUE(idx.validate_structure());
   EXPECT_TRUE(idx.has_shortcuts_for(profile_idx_t{0}));
   EXPECT_FALSE(idx.has_shortcuts_for(profile_idx_t{1}));
 
@@ -904,15 +926,17 @@ TEST(routing, tad_shortcut_transfer_provider) {
   EXPECT_TRUE(edges.empty());
 
   prf.out_offsets_[3] = 0;
+  EXPECT_FALSE(idx.validate_structure());
   EXPECT_FALSE(idx.has_shortcuts_for(profile_idx_t{0}));
 }
 
 TEST(routing, tad_shortcut_scalar_parity) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const transfer_idx = routing::build_tad_transfer_index(tt);
   EXPECT_TRUE(transfer_idx.is_valid_for_query(profile_idx_t{0}));
@@ -952,9 +976,10 @@ TEST(routing, tad_shortcut_scalar_parity) {
 TEST(routing, tad_station_grouping) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const grouping = routing::build_station_grouping(tt, profile_idx_t{0});
   EXPECT_EQ(tt.n_locations(), grouping.representative_of_stop_.size());
@@ -976,6 +1001,7 @@ TEST(routing, tad_station_grouping) {
 
 TEST(routing, tad_station_grouping_explicit_relationships) {
   timetable tt;
+  import_context ctx{tt};
   constexpr std::size_t n_locs = 5;
   tt.locations_.names_.resize(n_locs);
   tt.locations_.parents_.resize(n_locs, location_idx_t::invalid());
@@ -991,9 +1017,10 @@ TEST(routing, tad_station_grouping_explicit_relationships) {
   tt.locations_.parents_[loc1] = loc0;
 
   for (std::size_t i = 0; i < n_locs; ++i) {
-    tt.locations_.equivalences_.emplace_back();
+    tt.locations_.equivalences_.emplace_back(
+        i == 0 ? std::vector<location_idx_t>{loc2} : std::vector<location_idx_t>{});
   }
-  tt.locations_.equivalences_[loc0].emplace_back(loc2);
+
 
   tt.locations_.footpaths_out_[0][loc0].push_back(footpath{loc3, 0_minutes});
   tt.locations_.footpaths_out_[0][loc0].push_back(footpath{loc4, 5_minutes});
@@ -1014,22 +1041,24 @@ TEST(routing, tad_station_grouping_explicit_relationships) {
 TEST(routing, tad_ultra_builder_valid_index) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const idx = routing::build_tad_ultra_index(tt, 15);
   EXPECT_TRUE(idx.is_valid_for_query(profile_idx_t{0}));
   EXPECT_EQ(tt.n_locations(), idx.n_locations_);
-  EXPECT_EQ("ultra_witness_shortcuts_v1", idx.profiles_[0].transfer_time_fingerprint_);
+  EXPECT_EQ("ultra_conservative_shortcuts_v2", idx.profiles_[0].transfer_time_fingerprint_);
 }
 
 TEST(routing, tad_ultra_shortcut_scalar_parity) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
   EXPECT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
@@ -1090,8 +1119,9 @@ inline loader::mem_dir files_two_routes_multihop() {
 TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
   auto const loc_a = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
@@ -1099,7 +1129,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
   auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000004", src});
   auto const loc_d = tt.locations_.location_id_to_idx_.at({"0000005", src});
 
-  finalize(tt);
+  finalize(tt, ctx);
 
   tt.locations_.footpaths_out_[0].resize(tt.n_locations());
   tt.locations_.footpaths_in_[0].resize(tt.n_locations());
@@ -1131,7 +1161,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
       found_b_to_x = true;
     }
   }
-  EXPECT_FALSE(found_b_to_x);
+  EXPECT_TRUE(found_b_to_x);
 
   // Prove that run_witness_search() emitted the NEW SHORTCUT edge B -> C (7 min),
   // which was NOT a direct base footpath in tt!
@@ -1169,7 +1199,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
       found_long_a_to_d = true;
     }
   }
-  EXPECT_FALSE(found_long_a_to_d);
+  EXPECT_TRUE(found_long_a_to_d);
 
   // 2. Build index with witness transfer limit = 5 minutes (< 7 min multi-hop walk).
   auto const ultra_idx_5 = routing::build_tad_ultra_index(tt, 5);
@@ -1188,7 +1218,7 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
       found_emitted_b_to_c_5 = true;
     }
   }
-  EXPECT_FALSE(found_b_to_x_5);
+  EXPECT_TRUE(found_b_to_x_5);
   EXPECT_FALSE(found_emitted_b_to_c_5);
 
   // 3. Scalar search parity for query A -> D requiring the intermediate transfer.
@@ -1224,14 +1254,15 @@ TEST(routing, tad_ultra_builder_emitted_walking_shortcut_fixture) {
 TEST(routing, tad_ultra_builder_limit_validation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
   auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
   auto const loc_x = tt.locations_.location_id_to_idx_.at({"0000003", src});
   auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000004", src});
 
-  finalize(tt);
+  finalize(tt, ctx);
 
   tt.locations_.footpaths_out_[0].resize(tt.n_locations());
   tt.locations_.footpaths_in_[0].resize(tt.n_locations());
@@ -1272,8 +1303,9 @@ TEST(routing, tad_ultra_builder_limit_validation) {
 TEST(routing, tad_access_shortcut_integration) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
   auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
   auto const loc_x = tt.locations_.location_id_to_idx_.at({"0000003", src});
@@ -1287,7 +1319,7 @@ TEST(routing, tad_access_shortcut_integration) {
   tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
   tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
 
-  finalize(tt);
+  finalize(tt, ctx);
 
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
   ASSERT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
@@ -1339,8 +1371,9 @@ TEST(routing, tad_access_shortcut_integration) {
 TEST(routing, tad_access_shortcut_conflict_resolution) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
   auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
   auto const loc_x = tt.locations_.location_id_to_idx_.at({"0000003", src});
@@ -1354,7 +1387,7 @@ TEST(routing, tad_access_shortcut_conflict_resolution) {
   tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
   tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
 
-  finalize(tt);
+  finalize(tt, ctx);
 
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
   ASSERT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
@@ -1391,8 +1424,9 @@ TEST(routing, tad_access_shortcut_conflict_resolution) {
 TEST(routing, tad_egress_shortcut_integration) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
 
   auto const loc_a = tt.locations_.location_id_to_idx_.at({"0000001", src});
   auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
@@ -1406,7 +1440,7 @@ TEST(routing, tad_egress_shortcut_integration) {
   tt.locations_.footpaths_out_[0][loc_x].push_back(footpath{loc_c, 4_minutes});
   tt.locations_.footpaths_in_[0][loc_c].push_back(footpath{loc_x, 4_minutes});
 
-  finalize(tt);
+  finalize(tt, ctx);
 
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
   ASSERT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
@@ -1486,6 +1520,7 @@ TEST(routing, tad_ultra_direct_transfer_edge_routing) {
 )";
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
 
   constexpr auto const footpaths = R"(
@@ -1497,8 +1532,8 @@ TEST(routing, tad_ultra_direct_transfer_edge_routing) {
   dir.add({loader::hrd::hrd_5_20_26.fplan_ / "services.101", services});
   dir.dir_[loader::hrd::hrd_5_20_26.core_data_ / loader::hrd::hrd_5_20_26.required_files_[loader::hrd::FOOTPATHS][0]] = footpaths;
 
-  load_timetable(src, loader::hrd::hrd_5_20_26, dir, tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, dir, tt, ctx);
+  finalize(tt, ctx);
 
   auto const loc_b = tt.locations_.location_id_to_idx_.at({"0000002", src});
   auto const loc_c = tt.locations_.location_id_to_idx_.at({"0000003", src});
@@ -1568,9 +1603,10 @@ TEST(routing, tad_ultra_direct_transfer_edge_routing) {
 TEST(routing, tad_ultra_index_binary_serialization_and_validation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const idx = routing::build_tad_ultra_index(tt, 15);
   EXPECT_TRUE(idx.is_valid_for(tt, profile_idx_t{0}, 15));
@@ -1616,9 +1652,10 @@ TEST(routing, tad_ultra_index_binary_serialization_and_validation) {
 TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const idx = routing::build_tad_ultra_index(tt, 15);
   ASSERT_TRUE(idx.is_valid_for(tt, profile_idx_t{0}, 15));
@@ -1627,15 +1664,15 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
   // fixture were degenerate the mutation would be a silent no-op and the test
   // would still report green, so require a non-empty fixture up front.
   ASSERT_NE(0U, tt.n_locations());
-  ASSERT_FALSE(tt.route_stop_times_.empty());
+  ASSERT_FALSE(tt.transport_first_dep_.empty());
   ASSERT_FALSE(tt.transport_route_.empty());
   ASSERT_FALSE(tt.transport_traffic_days_.empty());
   ASSERT_FALSE(tt.bitfields_.empty());
   ASSERT_FALSE(tt.route_transport_ranges_.empty());
-  ASSERT_FALSE(tt.route_stop_time_ranges_.empty());
+  ASSERT_FALSE(tt.route_times_.empty());
   ASSERT_FALSE(tt.locations_.parents_.empty());
   ASSERT_FALSE(tt.locations_.equivalences_.empty());
-  ASSERT_FALSE(tt.locations_.children_.empty());
+  ASSERT_NE(0U, tt.locations_.children_.size());
 
   // One case per input group hashed by compute_tt_fingerprint(). Keep this
   // table in step with that function: an unhashed input is an index that
@@ -1666,13 +1703,13 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
        }},
       {"equivalences_",
        [](timetable& m) {
-         m.locations_.equivalences_[location_idx_t{0}].push_back(
-             location_idx_t{999});
+         m.locations_.equivalences_.emplace_back(
+             std::vector<location_idx_t>{location_idx_t{999}});
        }},
       {"children_",
        [](timetable& m) {
-         m.locations_.children_[location_idx_t{0}].push_back(
-             location_idx_t{999});
+         m.locations_.children_.emplace_back(
+             std::vector<location_idx_t>{location_idx_t{999}});
        }},
       {"location_routes_",
        [](timetable& m) {
@@ -1684,10 +1721,10 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
          auto& bf = m.bitfields_[bitfield_idx_t{0}];
          bf.set(0U, !bf.test(0U));
        }},
-      {"route_stop_times_",
+      {"transport_first_dep_",
        [](timetable& m) {
          // Derive the new value from the old one so it cannot coincide with it.
-         auto& d = m.route_stop_times_[0U];
+         auto& d = m.transport_first_dep_[transport_idx_t{0}];
          d = delta{static_cast<std::uint16_t>(d.count() + 1)};
        }},
       {"transport_route_",
@@ -1712,9 +1749,9 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
        [](timetable& m) {
          m.route_transport_ranges_[route_idx_t{0}].to_ = transport_idx_t{999};
        }},
-      {"route_stop_time_ranges_",
+      {"route_times_",
        [](timetable& m) {
-         m.route_stop_time_ranges_[route_idx_t{0}].to_ += 1U;
+         m.route_times_[route_idx_t{0}].pattern_start_ += 1U;
        }},
   };
 
@@ -1729,9 +1766,10 @@ TEST(routing, tad_ultra_index_fingerprint_invalidation_mutations) {
 TEST(routing, tad_ultra_index_requires_setup_time_validation) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const idx = routing::build_tad_ultra_index(tt, 15);
   auto const tmp_path =
@@ -1764,9 +1802,10 @@ TEST(routing, tad_ultra_index_requires_setup_time_validation) {
 TEST(routing, tad_query_does_not_recompute_timetable_fingerprint) {
   constexpr auto const src = source_idx_t{0U};
   timetable tt;
+  import_context ctx{tt};
   tt.date_range_ = full_period();
-  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt);
-  finalize(tt);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_abc(), tt, ctx);
+  finalize(tt, ctx);
 
   auto const ultra_idx = routing::build_tad_ultra_index(tt, 15);
   ASSERT_TRUE(ultra_idx.is_valid_for_query(profile_idx_t{0}));
@@ -1782,6 +1821,7 @@ TEST(routing, tad_query_does_not_recompute_timetable_fingerprint) {
   // Hashing the timetable is O(timetable) and belongs to index setup only.
   // Doing it per query silently turns every ULTRA measurement into a
   // measurement of the validation itself.
+  auto const offsets_before = routing::tad_profile_shortcuts::n_offset_validations_.load();
   auto const before =
       routing::tad_transfer_index::n_fingerprint_computations_.load();
 
@@ -1794,6 +1834,7 @@ TEST(routing, tad_query_does_not_recompute_timetable_fingerprint) {
 
   EXPECT_EQ(before,
             routing::tad_transfer_index::n_fingerprint_computations_.load());
+  EXPECT_EQ(offsets_before, routing::tad_profile_shortcuts::n_offset_validations_.load());
 }
 
 
@@ -1834,9 +1875,10 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
            {"long_intermediate", first + second, "0000001", "0000005", 16_minutes}}) {
     SCOPED_TRACE(c.name_);
     timetable tt;
+  import_context ctx{tt};
     tt.date_range_ = full_period();
-    load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(c.services_), tt);
-    finalize(tt);
+    load_timetable(src, loader::hrd::hrd_5_20_26, custom_hrd(c.services_), tt, ctx);
+    finalize(tt, ctx);
     auto const loc = [&](char const* id) {
       return tt.locations_.location_id_to_idx_.at({id, src});
     };

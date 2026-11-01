@@ -11,7 +11,7 @@
 
 #include "nigiri/loader/dir.h"
 #include "nigiri/loader/gtfs/load_timetable.h"
-#include "nigiri/loader/init_finish.h"
+#include "nigiri/loader/load.h"
 #include "nigiri/common/delta_t.h"
 #include "nigiri/routing/one_to_all.h"
 #include "nigiri/routing/query.h"
@@ -230,11 +230,9 @@ TEST(
                                     cista::mmap::protection::WRITE};
 
   // Load static timetable.
-  timetable tt;
-  tt.date_range_ = {date::sys_days{2024_y / January / 1},
-                    date::sys_days{2024_y / January / 2}};
-  load_timetable({}, source_idx_t{0U}, schedule, tt, nullptr, &shapes_data);
-  finalize(tt);
+  auto const tt =
+      loader::load(schedule, {2024_y / January / 1, 2024_y / January / 2}, {},
+                   nullptr, &shapes_data);
 
   // Create empty RT timetable.
   auto rtt = rt::create_rt_timetable(tt, date::sys_days{2024_y / January / 1});
@@ -243,6 +241,12 @@ TEST(
   auto leg_shape = std::vector<geo::latlng>{};
   auto const plot_point = [&leg_shape](geo::latlng const& point) {
     leg_shape.push_back(point);
+  };
+
+  using round_times_t = std::vector<std::pair<std::uint8_t, duration_t>>;
+  auto round_times = round_times_t{};
+  auto const add_round_time = [&](std::uint8_t const k, duration_t const d) {
+    round_times.emplace_back(k, d);
   };
 
   auto const to_location_idx = [&](std::string_view x) {
@@ -894,6 +898,24 @@ TEST(
                   delta_t{185 + kDefaultFootpathDuration.count()});
         ASSERT_EQ(stats_s_direct.k_, 1U);
       }
+      // Test round times
+      {
+        round_times.clear();
+        routing::for_each_one_to_all_round_time(
+            tt, state, kSearchDir, to_location_idx("S"), start_time,
+            q.max_transfers_, add_round_time);
+        EXPECT_EQ(
+            (round_times_t{{1, duration_t{185} + kDefaultFootpathDuration},
+                           {2, duration_t{140} + kDefaultFootpathDuration}}),
+            round_times);
+        round_times.clear();
+        routing::for_each_one_to_all_round_time(
+            tt, state, kSearchDir, to_location_idx("W"), start_time,
+            q.max_transfers_, add_round_time);
+        EXPECT_EQ(
+            (round_times_t{{2, duration_t{200} + kDefaultFootpathDuration}}),
+            round_times);
+      }
     }
   }
   // One-to-All backwards search for time point
@@ -971,6 +993,13 @@ TEST(
         q.max_transfers_);
     EXPECT_EQ(stats_f.duration_,
               delta_t{-110 - kDefaultFootpathDuration.count()});
+    // Test round times
+    round_times.clear();
+    routing::for_each_one_to_all_round_time(tt, state, kSearchDir,
+                                            to_location_idx("F"), start_time,
+                                            q.max_transfers_, add_round_time);
+    EXPECT_EQ((round_times_t{{1, duration_t{110} + kDefaultFootpathDuration}}),
+              round_times);
   }
   // Loading statistics
   {

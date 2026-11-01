@@ -11,6 +11,8 @@ struct timetable;
 
 namespace nigiri::loader {
 
+struct import_context;
+
 extern gtfs::tz_map dummy_tz_map;
 
 struct attribute {
@@ -34,6 +36,7 @@ struct agency {
          std::string_view id,
          translation_idx_t name,
          translation_idx_t url,
+         translation_idx_t fare_url,
          timezone_idx_t,
          gtfs::tz_map& = dummy_tz_map);
   agency(timetable&, provider_idx_t);
@@ -48,6 +51,10 @@ struct agency {
   translated_str_t get_url_translations() const;
   void set_url(translated_str_t);
 
+  std::string_view get_fare_url() const;
+  translated_str_t get_fare_url_translations() const;
+  void set_fare_url(translated_str_t);
+
   std::optional<std::string_view> get_timezone() const;
   void set_timezone(std::string_view);
 
@@ -56,6 +63,7 @@ struct agency {
   std::string_view id_;
   translation_idx_t name_;
   translation_idx_t url_;
+  translation_idx_t fare_url_;
   timezone_idx_t timezone_idx_;
 
   timetable* tt_{nullptr};
@@ -68,6 +76,7 @@ struct location {
            std::string_view id,
            translation_idx_t name,
            translation_idx_t platform_code,
+           translation_idx_t stop_code,
            translation_idx_t desc,
            geo::latlng pos,
            location_type,
@@ -87,6 +96,10 @@ struct location {
   translated_str_t get_platform_code_translations() const;
   void set_platform_code(translated_str_t);
 
+  std::string_view get_stop_code() const;
+  translated_str_t get_stop_code_translations() const;
+  void set_stop_code(translated_str_t);
+
   std::string_view get_description() const;
   translated_str_t get_description_translations() const;
   void set_description(translated_str_t);
@@ -104,6 +117,7 @@ struct location {
   std::string_view id_;
   translation_idx_t name_;
   translation_idx_t platform_code_;
+  translation_idx_t stop_code_;
   translation_idx_t description_;
   geo::latlng pos_;
   location_type type_;
@@ -121,9 +135,12 @@ struct route {
         std::string_view id,
         translation_idx_t short_name,
         translation_idx_t long_name,
+        translation_idx_t url,
         route_type_t,
         route_color,
-        provider_idx_t);
+        provider_idx_t,
+        category_idx_t,
+        ticketing_link_idx_t);
   route(timetable&, source_idx_t, route_id_idx_t);
 
   std::string_view get_id() const;
@@ -135,6 +152,10 @@ struct route {
   std::string_view get_long_name() const;
   translated_str_t get_long_name_translations() const;
   void set_long_name(translated_str_t);
+
+  std::string_view get_url() const;
+  translated_str_t get_url_translations() const;
+  void set_url(translated_str_t);
 
   std::uint16_t get_route_type() const;
   void set_route_type(std::uint16_t);
@@ -154,9 +175,12 @@ struct route {
   std::string_view id_;
   translation_idx_t short_name_;
   translation_idx_t long_name_;
+  translation_idx_t url_;
   route_type_t route_type_;
   route_color color_;
   provider_idx_t agency_;
+  category_idx_t category_;
+  ticketing_link_idx_t ticketing_link_;
 
   timetable* tt_{nullptr};
 };
@@ -172,6 +196,7 @@ struct trip {
        std::string_view vehicle_type_short_name,
        direction_id_t,
        route_id_idx_t,
+       std::array<bool, kNumRouteFlags>&,
        trip_debug);
 
   std::string_view get_id() const;
@@ -196,6 +221,15 @@ struct trip {
 
   route get_route() const;
 
+  bool get_bikes_allowed() const;
+  void set_bikes_allowed(bool) const;
+  bool get_cars_allowed() const;
+  void set_cars_allowed(bool) const;
+  bool get_wheelchair_accessible() const;
+  void set_wheelchair_accessible(bool) const;
+  bool get_compulsory_reservation() const;
+  void set_compulsory_reservation(bool) const;
+
   source_idx_t src_;
   std::string_view id_;
   translation_idx_t headsign_;
@@ -205,6 +239,7 @@ struct trip {
   std::string_view vehicle_type_short_name_;
   direction_id_t direction_;
   route_id_idx_t route_;
+  std::array<bool, kNumRouteFlags>& flags_;
   trip_debug dbg_;
 
   timetable* tt_{nullptr};
@@ -227,8 +262,8 @@ bool process_trip(script_runner const&, trip&);
 
 attribute_idx_t register_attribute(timetable&, attribute const&);
 provider_idx_t register_agency(timetable&, agency const&);
-location_idx_t register_location(timetable&, location const&);
-route_id_idx_t register_route(timetable&, route const&);
-trip_idx_t register_trip(timetable&, trip const&);
+location_idx_t register_location(timetable&, import_context&, location const&);
+route_id_idx_t register_route(timetable&, import_context&, route const&);
+trip_idx_t register_trip(timetable&, import_context&, trip const&);
 
 }  // namespace nigiri::loader

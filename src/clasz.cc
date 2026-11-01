@@ -84,7 +84,7 @@ clasz get_clasz(std::string_view s) {
     case hash("RegioExpress"):
     case hash("TER"):  // Transport express regional
     case hash("TE2"): [[fallthrough]];  // Transport express regional
-    case hash("Cross-Country Rail"): return clasz::kRegionalFast;
+    case hash("Cross-Country Rail"): return clasz::kRegional;
 
     // local trains
     case hash("Railway Service"):
@@ -218,7 +218,9 @@ clasz to_clasz(std::string_view s) {
     case cista::hash("LONGDISTANCE"): return clasz::kLongDistance;
     case cista::hash("COACH"): return clasz::kCoach;
     case cista::hash("NIGHT"): return clasz::kNight;
-    case cista::hash("REGIONALFAST"): return clasz::kRegionalFast;
+    case cista::hash("RIDE_SHARING"): return clasz::kRideSharing;
+    case cista::hash("RIDESHARING"): return clasz::kRideSharing;
+    case cista::hash("REGIONALFAST"): return clasz::kRegional;
     case cista::hash("REGIONAL"): return clasz::kRegional;
     case cista::hash("METRO"): return clasz::kSuburban;
     case cista::hash("SUBURBAN"): return clasz::kSuburban;
@@ -226,6 +228,9 @@ clasz to_clasz(std::string_view s) {
     case cista::hash("TRAM"): return clasz::kTram;
     case cista::hash("BUS"): return clasz::kBus;
     case cista::hash("SHIP"): return clasz::kShip;
+    case cista::hash("ODM"): return clasz::kODM;
+    case cista::hash("FUNICULAR"): return clasz::kODM;
+    case cista::hash("AERIALLIFT"): return clasz::kAerialLift;
     case cista::hash("OTHER"): return clasz::kOther;
   }
   throw utl::fail("{} is not a valid clasz", s);

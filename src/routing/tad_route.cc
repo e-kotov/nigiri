@@ -1,4 +1,5 @@
 #include "nigiri/routing/tad/tad_route.h"
+#include "nigiri/routing/raptor_search.h"
 #include "nigiri/routing/tad/tad_search.h"
 #include "nigiri/routing/tad/tad_reconstruct.h"
 #include "nigiri/routing/journey.h"
@@ -22,8 +23,17 @@ routing_result tad_route(
     tad_state& t_state,
     query q,
     direction search_dir,
-    std::optional<std::chrono::seconds>,
+    std::optional<std::chrono::seconds> timeout,
     tad_transfer_index const* transfer_index) {
+    // These contracts are implemented by upstream RAPTOR. Scalar TAD has no
+    // reservation/vehicle-wheelchair filter or RT-only journey reconstruction.
+    if (q.no_compulsory_reservation_ || q.prf_idx_ == kWheelchairProfile ||
+        (rtt != nullptr && rtt->n_rt_transports() != 0U)) {
+      raptor_state state;
+      auto result = raptor_search(tt, rtt, s_state, state, q, search_dir, timeout);
+      result.algo_stats_["tad_fallback_raptor"] = 1U;
+      return result;
+    }
     s_state.results_.clear();
 
     q.sanitize(tt);
@@ -48,15 +58,15 @@ routing_result tad_route(
     auto const search_base_date = tt.internal_interval_days().from_ + search_base_day.v_ * date::days{1};
     auto const query_delta = unix_to_delta(search_base_date, query_time);
     
+    // Endpoint walking must not depend on intermediate transit witnesses.
+    // Non-default adjustments remain per-edge on the fallback path.
     std::unique_ptr<tad_transfer_provider> transfer_provider;
     if (transfer_index != nullptr &&
         transfer_index->is_valid_for_query(q.prf_idx_, q.transfer_time_settings_)) {
-        transfer_provider = std::make_unique<shortcut_transfer_provider>(
-            transfer_index->profiles_[cista::to_idx(q.prf_idx_)]);
+        transfer_provider = std::make_unique<endpoint_transfer_provider>(tt, q.prf_idx_);
     } else {
         if (transfer_index != nullptr) {
-            warn_transfer_index_unusable(*transfer_index, q.prf_idx_,
-                                         q.transfer_time_settings_);
+            warn_transfer_index_unusable(*transfer_index, q.prf_idx_, q.transfer_time_settings_);
         }
         transfer_provider = std::make_unique<footpath_transfer_provider>(tt, q.prf_idx_);
     }

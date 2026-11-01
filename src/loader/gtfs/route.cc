@@ -11,6 +11,7 @@
 #include "nigiri/loader/register.h"
 #include "nigiri/logging.h"
 #include "nigiri/timetable.h"
+#include "nigiri/types.h"
 
 namespace nigiri::loader::gtfs {
 
@@ -25,7 +26,7 @@ clasz to_clasz(std::uint16_t const route_type) {
     case 1 /* Subway, Metro. Any underground rail system within a metropolitan area. */ :
       return clasz::kSubway;
     case 2 /* Rail. Used for intercity or long-distance travel. */:
-      return clasz::kRegionalFast;
+      return clasz::kRegional;
     case 3 /* Bus. Used for short- and long-distance bus routes. */:
       return clasz::kBus;
     case 4 /* Ferry. Used for short- and long-distance boat service. */:
@@ -40,7 +41,7 @@ clasz to_clasz(std::uint16_t const route_type) {
       return clasz::kBus;
     case 12 /* Monorail. Railway in which the track consists of a single rail or a beam. */ :
       return clasz::kOther;
-    case 100 /* Railway Service */: return clasz::kRegionalFast;
+    case 100 /* Railway Service */: return clasz::kRegional;
     case 101 /* High Speed Rail Service */: return clasz::kHighSpeed;
     case 102 /* Long Distance Trains */: return clasz::kLongDistance;
     case 103 /* Inter Regional Rail Service */: return clasz::kRegional;
@@ -61,13 +62,13 @@ clasz to_clasz(std::uint16_t const route_type) {
     case 117 /* Additional Rail Service */: return clasz::kRegional;
     case 200 /* Coach Service */:
     case 201 /* International Coach Service */:
-    case 202 /* National Coach Service */:
+    case 202 /* National Coach Service */: return clasz::kCoach;
     case 203 /* Shuttle Coach Service */:
-    case 204 /* Regional Coach Service */:
+    case 204 /* Regional Coach Service */: return clasz::kBus;
     case 205 /* Special Coach Service */:
     case 206 /* Sightseeing Coach Service */:
-    case 207 /* Tourist Coach Service */:
-    case 208 /* Commuter Coach Service */:
+    case 207 /* Tourist Coach Service */: return clasz::kCoach;
+    case 208 /* Commuter Coach Service */: return clasz::kBus;
     case 209 /* All Coach Services */: return clasz::kCoach;
     case 400 /* Urban Railway Service */:
     case 401 /* Metro Service */:
@@ -120,6 +121,7 @@ clasz to_clasz(std::uint16_t const route_type) {
     case 1505 /* Licensed Taxi Service */:
     case 1506 /* Private Hire Service Vehicle */:
     case 1507 /* All Taxi Services */: return clasz::kODM;
+    case 1551 /* Ride Sharing */: return clasz::kRideSharing;
     case 1700 /* Miscellaneous Service */:
     case 1702 /* Horse-drawn Carriage */: return clasz::kOther;
   }
@@ -140,6 +142,7 @@ clasz to_clasz(std::uint16_t const route_type) {
 
 route_map_t read_routes(source_idx_t const src,
                         timetable& tt,
+                        import_context& ctx,
                         translator& i18n,
                         tz_map& timezones,
                         agency_map_t& agencies,
@@ -158,11 +161,15 @@ route_map_t read_routes(source_idx_t const src,
     utl::csv_col<utl::cstr, UTL_NAME("agency_id")> agency_id_;
     utl::csv_col<utl::cstr, UTL_NAME("route_short_name")> route_short_name_;
     utl::csv_col<utl::cstr, UTL_NAME("route_long_name")> route_long_name_;
+    utl::csv_col<utl::cstr, UTL_NAME("route_url")> route_url_;
     utl::csv_col<utl::cstr, UTL_NAME("route_desc")> route_desc_;
     utl::csv_col<std::uint16_t, UTL_NAME("route_type")> route_type_;
     utl::csv_col<utl::cstr, UTL_NAME("route_color")> route_color_;
     utl::csv_col<utl::cstr, UTL_NAME("route_text_color")> route_text_color_;
     utl::csv_col<utl::cstr, UTL_NAME("network_id")> network_id_;
+    // Google Transit Ticketing extension
+    utl::csv_col<utl::cstr, UTL_NAME("ticketing_deep_link_id")>
+        ticketing_deep_link_id_;
   };
 
   auto const progress_tracker = utl::get_active_progress_tracker();
@@ -188,7 +195,7 @@ route_map_t read_routes(source_idx_t const src,
                                           : r.agency_id_->view();
                       return register_agency(
                           tt, agency{tt, src, id, kEmptyTranslation,
-                                     kEmptyTranslation,
+                                     kEmptyTranslation, kEmptyTranslation,
                                      get_tz_idx(tt, timezones, default_tz),
                                      timezones});
                     });
@@ -205,15 +212,23 @@ route_map_t read_routes(source_idx_t const src,
                        r.route_short_name_->view(), r.route_id_->view()),
               i18n.get(t::kRoutes, f::kRouteLongName,
                        r.route_long_name_->view(), r.route_id_->view()),
+              i18n.get(t::kRoutes, f::kRouteURL, r.route_url_->view(),
+                       r.route_id_->view()),
               route_type_t{*r.route_type_},
               {.color_ = to_color(r.route_color_->view()),
                .text_color_ = to_color(r.route_text_color_->view())},
-              a};
+              a,
+              category_idx_t::invalid(),
+              ticketing_link_idx_t::invalid(),
+          };
           if (process_route(user_script, x)) {
             map.emplace(r.route_id_->to_str(),
                         std::make_unique<route>(route{
-                            .route_id_idx_ = register_route(tt, x),
-                            .network_ = std::string{r.network_id_->view()}}));
+                            .route_id_idx_ = register_route(tt, ctx, x),
+                            .network_ = std::string{r.network_id_->view()},
+                            .ticketing_deep_link_id_ =
+                                std::string{r.ticketing_deep_link_id_->view()},
+                        }));
           }
         });
   return map;

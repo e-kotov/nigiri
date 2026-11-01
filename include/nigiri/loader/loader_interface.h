@@ -16,13 +16,17 @@ namespace nigiri::loader {
 
 struct loader_config {
   unsigned link_stop_distance_{100U};
+  duration_t default_transfer_time_{2};
   std::string default_tz_{};
   std::array<bool, kNumClasses> bikes_allowed_default_{};
   std::array<bool, kNumClasses> cars_allowed_default_{};
+  std::array<bool, kNumClasses> reservation_not_required_default_{};
   bool extend_calendar_{false};
   std::string user_script_{};
   hash_set<std::string> base_paths_{};
 };
+
+struct import_context;
 
 struct loader_interface {
   virtual ~loader_interface();
@@ -31,7 +35,7 @@ struct loader_interface {
                     source_idx_t,
                     dir const&,
                     timetable&,
-                    hash_map<bitfield, bitfield_idx_t>&,
+                    import_context&,
                     assistance_times*,
                     shapes_storage*) const = 0;
   virtual std::string_view name() const = 0;

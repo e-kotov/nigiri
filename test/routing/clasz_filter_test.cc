@@ -1,8 +1,6 @@
 #include "gtest/gtest.h"
 
 #include "nigiri/loader/gtfs/files.h"
-#include "nigiri/loader/gtfs/load_timetable.h"
-#include "nigiri/loader/init_finish.h"
 #include "nigiri/loader/load.h"
 
 #include "nigiri/rt/create_rt_timetable.h"
@@ -131,14 +129,8 @@ routing::clasz_mask_t make_mask(T... c) {
 }
 
 TEST(routing, clasz_filter_test) {
-  auto tt = timetable{};
-
-  tt.date_range_ = {date::sys_days{2024_y / March / 1},
-                    date::sys_days{2024_y / March / 2}};
-  loader::register_special_stations(tt);
-  loader::gtfs::load_timetable({}, source_idx_t{0},
-                               loader::mem_dir::read(test_files), tt);
-  loader::finalize(tt);
+  auto const tt = loader::load(loader::mem_dir::read(test_files),
+                               {2024_y / March / 1, 2024_y / March / 2});
 
   {  // All classes.
     auto const results =
@@ -151,7 +143,7 @@ TEST(routing, clasz_filter_test) {
   {  // All available classes.
     auto const results = raptor_search(
         tt, nullptr, "A", "C", tt.date_range_, direction::kForward,
-        make_mask(clasz::kBus, clasz::kRegionalFast, clasz::kAir));
+        make_mask(clasz::kBus, clasz::kRegional, clasz::kAir));
 
     EXPECT_EQ(expected, to_string(tt, results));
   }
@@ -159,7 +151,7 @@ TEST(routing, clasz_filter_test) {
   {  // No plane - one transfer, 2h
     auto const results = raptor_search(
         tt, nullptr, "A", "C", tt.date_range_, direction::kForward,
-        make_mask(clasz::kBus, clasz::kRegionalFast));
+        make_mask(clasz::kBus, clasz::kRegional));
 
     EXPECT_EQ(expected_1, to_string(tt, results));
   }
@@ -191,9 +183,9 @@ TEST(routing, clasz_filter_test) {
   rt::gtfsrt_update_msg(tt, rtt, source_idx_t{0}, "", msg);
 
   {  // All available classes.
-    auto const results = raptor_search(
-        tt, &rtt, "A", "C", tt.date_range_, direction::kForward,
-        make_mask(clasz::kBus, clasz::kRegionalFast, clasz::kAir));
+    auto const results =
+        raptor_search(tt, &rtt, "A", "C", tt.date_range_, direction::kForward,
+                      make_mask(clasz::kBus, clasz::kRegional, clasz::kAir));
 
     EXPECT_EQ(expected_rt, to_string(tt, results));
   }
@@ -201,7 +193,7 @@ TEST(routing, clasz_filter_test) {
   {  // No plane - one transfer, 2h
     auto const results =
         raptor_search(tt, &rtt, "A", "C", tt.date_range_, direction::kForward,
-                      make_mask(clasz::kBus, clasz::kRegionalFast));
+                      make_mask(clasz::kBus, clasz::kRegional));
 
     EXPECT_EQ(expected_rt_1, to_string(tt, results));
   }

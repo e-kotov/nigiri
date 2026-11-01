@@ -16,6 +16,7 @@
 #include "nigiri/loader/dir.h"
 #include "nigiri/loader/gtfs/loader.h"
 #include "nigiri/loader/hrd/loader.h"
+#include "nigiri/loader/import_context.h"
 #include "nigiri/loader/init_finish.h"
 #include "nigiri/logging.h"
 #include "nigiri/rt/create_rt_timetable.h"
@@ -73,14 +74,12 @@ nigiri_timetable_t* nigiri_load_from_dir(nigiri::loader::dir const& d,
                         floor<days>(std::chrono::system_clock::from_time_t(
                             static_cast<time_t>(to_ts)))};
 
-  nigiri::loader::register_special_stations(*t->tt);
-
-  auto local_bitfield_indices =
-      nigiri::hash_map<nigiri::bitfield, nigiri::bitfield_idx_t>{};
+  auto ctx = nigiri::loader::import_context{*t->tt};
+  nigiri::loader::register_special_stations(*t->tt, ctx);
   (*c)->load({.link_stop_distance_ = link_stop_distance,
               .default_tz_ = "Europe/Berlin"},
-             src, d, *t->tt, local_bitfield_indices, nullptr, nullptr);
-  nigiri::loader::finalize(*t->tt);
+             src, d, *t->tt, ctx, nullptr, nullptr);
+  nigiri::loader::finalize(*t->tt, ctx);
 
   t->rtt = std::make_shared<nigiri::rt_timetable>(
       nigiri::rt::create_rt_timetable(*t->tt, t->tt->date_range_.from_));
@@ -164,7 +163,14 @@ bool nigiri_is_transport_active(nigiri_timetable_t const* t,
                                 uint32_t const transport_idx,
                                 uint16_t day_idx) {
   auto const tidx = nigiri::transport_idx_t{transport_idx};
-  return t->tt->bitfields_[t->tt->transport_traffic_days_[tidx]].test(day_idx);
+  return t->tt->is_transport_active(tidx, nigiri::day_idx_t{day_idx});
+}
+
+bool nigiri_is_route_active(nigiri_timetable_t const* t,
+                            uint32_t const route_idx,
+                            uint16_t day_idx) {
+  auto const ridx = nigiri::route_idx_t{route_idx};
+  return t->tt->is_route_active(ridx, nigiri::day_idx_t{day_idx});
 }
 
 uint32_t nigiri_get_route_count(nigiri_timetable_t const* t) {

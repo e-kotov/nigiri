@@ -9,6 +9,7 @@
 #include "utl/pipes/transform.h"
 
 #include "nigiri/loader/gtfs/parse_time.h"
+#include "nigiri/loader/import_context.h"
 #include "nigiri/logging.h"
 #include "nigiri/timetable.h"
 
@@ -158,13 +159,14 @@ hash_map<std::string, leg_group_idx_t> parse_leg_rules(
         contains_area_set_id_;
   };
 
-  f.has_priority_ =
+  auto const has_priority =
       utl::read_header<fare_leg_rule_record>(
           utl::buf_reader<utl::noop_progress_consumer>{file_content}
               .read_line())[7] != utl::NO_COLUMN_IDX;
 
   auto m = hash_map<std::string, leg_group_idx_t>{};
   auto next_leg_group_idx = leg_group_idx_t{};
+  auto rules = std::vector<fares::fare_leg_rule>{};
   utl::for_each_row<fare_leg_rule_record>(
       file_content, [&](fare_leg_rule_record const& r) {
         auto const leg_group_idx =
@@ -184,51 +186,89 @@ hash_map<std::string, leg_group_idx_t> parse_leg_rules(
           return;
         }
 
-        f.fare_leg_rules_.push_back(
-            {.rule_priority_ = r.rule_priority_->value_or(0U),
-             .network_ = r.network_id_
-                             ->and_then([&](utl::cstr const& x) {
-                               return find(networks, x.view());
-                             })
-                             .value_or(network_idx_t::invalid()),
-             .from_area_ = r.from_area_id_
-                               ->and_then([&](utl::cstr const& x) {
-                                 return find(areas, x.view());
-                               })
-                               .value_or(area_idx_t::invalid()),
-             .to_area_ = r.to_area_id_
-                             ->and_then([&](utl::cstr const& x) {
-                               return find(areas, x.view());
-                             })
-                             .value_or(area_idx_t::invalid()),
-             .from_timeframe_group_ =
-                 r.from_timeframe_group_id_
-                     ->and_then([&](utl::cstr const& x) {
-                       return find(timeframes, x.view());
-                     })
-                     .value_or(timeframe_group_idx_t::invalid()),
-             .to_timeframe_group_ =
-                 r.to_timeframe_group_id_
-                     ->and_then([&](utl::cstr const& x) {
-                       return find(timeframes, x.view());
-                     })
-                     .value_or(timeframe_group_idx_t::invalid()),
-             .fare_product_ =
-                 fare_product.value_or(fare_product_idx_t::invalid()),
-             .leg_group_idx_ = leg_group_idx,
-             .contains_exactly_area_set_id_ =
-                 r.contains_exactly_area_set_id_
-                     ->and_then([&](utl::cstr const& x) {
-                       return find(area_sets, x.view());
-                     })
-                     .value_or(area_set_idx_t::invalid()),
-             .contains_area_set_id_ =
-                 r.contains_area_set_id_
-                     ->and_then([&](utl::cstr const& x) {
-                       return find(area_sets, x.view());
-                     })
-                     .value_or(area_set_idx_t::invalid())});
+        rules.push_back({.rule_priority_ = r.rule_priority_->value_or(0U),
+                         .network_ = r.network_id_
+                                         ->and_then([&](utl::cstr const& x) {
+                                           return find(networks, x.view());
+                                         })
+                                         .value_or(network_idx_t::invalid()),
+                         .from_area_ = r.from_area_id_
+                                           ->and_then([&](utl::cstr const& x) {
+                                             return find(areas, x.view());
+                                           })
+                                           .value_or(area_idx_t::invalid()),
+                         .to_area_ = r.to_area_id_
+                                         ->and_then([&](utl::cstr const& x) {
+                                           return find(areas, x.view());
+                                         })
+                                         .value_or(area_idx_t::invalid()),
+                         .from_timeframe_group_ =
+                             r.from_timeframe_group_id_
+                                 ->and_then([&](utl::cstr const& x) {
+                                   return find(timeframes, x.view());
+                                 })
+                                 .value_or(timeframe_group_idx_t::invalid()),
+                         .to_timeframe_group_ =
+                             r.to_timeframe_group_id_
+                                 ->and_then([&](utl::cstr const& x) {
+                                   return find(timeframes, x.view());
+                                 })
+                                 .value_or(timeframe_group_idx_t::invalid()),
+                         .fare_product_ = fare_product.value_or(
+                             fare_product_idx_t::invalid()),
+                         .leg_group_idx_ = leg_group_idx,
+                         .contains_exactly_area_set_id_ =
+                             r.contains_exactly_area_set_id_
+                                 ->and_then([&](utl::cstr const& x) {
+                                   return find(area_sets, x.view());
+                                 })
+                                 .value_or(area_set_idx_t::invalid()),
+                         .contains_area_set_id_ =
+                             r.contains_area_set_id_
+                                 ->and_then([&](utl::cstr const& x) {
+                                   return find(area_sets, x.view());
+                                 })
+                                 .value_or(area_set_idx_t::invalid())});
       });
+
+  utl::sort(rules, [](auto&& a, auto&& b) {
+    return a.rule_priority_ < b.rule_priority_;
+  });
+
+  auto tmp = vector_map<fares::fare_leg_rule_group_idx_t,
+                        std::vector<fares::fare_leg_rule>>{};
+  for (auto const& r : rules) {
+    auto const key = fares::fare_leg_rule_key{
+        .network_ = r.network_,
+        .from_area_ = r.from_area_,
+        .to_area_ = r.to_area_,
+        .from_timeframe_group_ = r.from_timeframe_group_,
+        .to_timeframe_group_ = r.to_timeframe_group_};
+    auto const group_idx =
+        utl::get_or_create(f.fare_leg_rule_keys_, key, [&]() {
+          auto const idx = fares::fare_leg_rule_group_idx_t{tmp.size()};
+          tmp.emplace_back();
+          return idx;
+        });
+    tmp[group_idx].push_back(r);
+
+    if (!has_priority) {
+      if (r.network_ != network_idx_t::invalid()) {
+        f.concrete_networks_.emplace(r.network_);
+      }
+      if (r.from_area_ != area_idx_t::invalid()) {
+        f.concrete_from_areas_.emplace(r.from_area_);
+      }
+      if (r.to_area_ != area_idx_t::invalid()) {
+        f.concrete_to_areas_.emplace(r.to_area_);
+      }
+    }
+  }
+
+  for (auto const& group : tmp) {
+    f.fare_leg_rule_groups_.emplace_back(group);
+  }
+
   return m;
 }
 
@@ -236,7 +276,7 @@ hash_map<std::string, timeframe_group_idx_t> parse_timeframes(
     timetable& tt,
     std::string_view file_content,
     fares& f,
-    hash_map<std::string, std::unique_ptr<bitfield> > const& services) {
+    hash_map<std::string, std::unique_ptr<bitfield>> const& services) {
   struct timeframe_record {
     utl::csv_col<utl::cstr, UTL_NAME("timeframe_group_id")> timeframe_group_id_;
     utl::csv_col<std::optional<utl::cstr>, UTL_NAME("start_time")> start_time_;
@@ -369,6 +409,7 @@ void parse_route_networks(
 
 hash_map<std::string, location_idx_t> parse_stop_areas(
     timetable& tt,
+    import_context& ctx,
     std::string_view file_content,
     hash_map<std::string, area_idx_t> const& areas,
     stops_map_t const& stops) {
@@ -377,7 +418,7 @@ hash_map<std::string, location_idx_t> parse_stop_areas(
     utl::csv_col<utl::cstr, UTL_NAME("stop_id")> stop_id_;
   };
 
-  tt.location_areas_.resize(tt.n_locations());
+  ctx.location_areas_.resize(tt.n_locations());
 
   auto m = hash_map<std::string, location_idx_t>{};
   utl::for_each_row<stop_area_record>(
@@ -396,7 +437,7 @@ hash_map<std::string, location_idx_t> parse_stop_areas(
           return;
         }
 
-        tt.location_areas_[*l_idx].push_back(*area_idx);
+        ctx.location_areas_[*l_idx].push_back(*area_idx);
       });
   return m;
 }
@@ -543,6 +584,7 @@ hash_map<std::string, rider_category_idx_t> parse_rider_categories(
 }
 
 void load_fares(timetable& tt,
+                import_context& ctx,
                 dir const& d,
                 traffic_days_t const& services,
                 route_map_t const& routes,
@@ -568,16 +610,12 @@ void load_fares(timetable& tt,
       parse_leg_rules(tt, load(kFareLegRulesFile).data(), f, area_sets,
                       networks, areas, timeframes, products);
   auto const stop_areas =
-      parse_stop_areas(tt, load(kStopAreasFile).data(), areas, stops);
+      parse_stop_areas(tt, ctx, load(kStopAreasFile).data(), areas, stops);
   parse_fare_leg_join_rules(load(kFareLegJoinRulesFile).data(), f, networks,
                             stops);
   parse_fare_transfer_rules(load(kFareTransferRulesFile).data(), f, products,
                             leg_groups);
 
-  utl::sort(f.fare_leg_rules_,
-            [](fares::fare_leg_rule const& a, fares::fare_leg_rule const& b) {
-              return a.rule_priority_ < b.rule_priority_;
-            });
   utl::sort(f.fare_leg_join_rules_);
 }
 

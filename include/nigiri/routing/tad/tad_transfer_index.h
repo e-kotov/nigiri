@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -27,11 +28,14 @@ struct tad_profile_shortcuts {
            valid_offsets(in_offsets_, in_edges_, n_locations);
   }
 
+  static inline std::atomic<std::uint64_t> n_offset_validations_{0U};
+
   static bool valid_offsets(vector<std::uint32_t> const& offsets,
                             vector<tad_transfer_edge> const& edges,
                             std::uint32_t const n_locations) {
+    n_offset_validations_.fetch_add(1U, std::memory_order_relaxed);
     if (offsets.size() != n_locations + 1U || offsets.empty() ||
-        offsets.front() != 0U || offsets.back() > edges.size()) {
+        offsets.front() != 0U || offsets.back() != edges.size()) {
       return false;
     }
     for (auto i = 1U; i != offsets.size(); ++i) {
@@ -44,7 +48,7 @@ struct tad_profile_shortcuts {
 };
 
 struct tad_transfer_index {
-  static constexpr std::uint32_t kVersion = 3U;
+  static constexpr std::uint32_t kVersion = 4U;
 
   std::uint32_t version_{kVersion};
   std::uint32_t n_locations_{0U};
@@ -59,6 +63,7 @@ struct tad_transfer_index {
   // about to be used with. read() leaves it false, so a freshly loaded index is
   // unusable until it has been validated once.
   bool timetable_validated_{false};
+  std::array<bool, kNProfiles> profile_validated_{};
 
   // Diagnostic: how often the O(timetable) fingerprint was computed. Setup
   // hashes the timetable once per index; a query must never increment this.
@@ -66,131 +71,80 @@ struct tad_transfer_index {
 
   static std::uint64_t compute_tt_fingerprint(timetable const& tt) {
     n_fingerprint_computations_.fetch_add(1U, std::memory_order_relaxed);
-    std::uint64_t fp = 14695981039346656037ULL;  // FNV-1a 64-bit offset basis
-    auto const fnv_combine = [&](std::uint64_t val) {
-      fp ^= val;
+    std::uint64_t fp = 14695981039346656037ULL;
+    auto const add = [&](auto const value) {
+      fp ^= static_cast<std::uint64_t>(value);
       fp *= 1099511628211ULL;
     };
-    fnv_combine(static_cast<std::uint64_t>(tt.n_locations()));
-    fnv_combine(static_cast<std::uint64_t>(tt.route_location_seq_.size()));
-    fnv_combine(static_cast<std::uint64_t>(tt.transport_traffic_days_.size()));
-    fnv_combine(static_cast<std::uint64_t>(tt.locations_.parents_.size()));
-    fnv_combine(static_cast<std::uint64_t>(tt.locations_.equivalences_.size()));
-    fnv_combine(static_cast<std::uint64_t>(tt.locations_.children_.size()));
-    fnv_combine(static_cast<std::uint64_t>(tt.location_routes_.size()));
-    fnv_combine(static_cast<std::uint64_t>(tt.bitfields_.size()));
-    fnv_combine(static_cast<std::uint64_t>(tt.route_stop_times_.size()));
-    fnv_combine(static_cast<std::uint64_t>(tt.transport_route_.size()));
-    fnv_combine(static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::minutes>(
-            tt.date_range_.from_.time_since_epoch()).count()));
-    fnv_combine(static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::minutes>(
-            tt.date_range_.to_.time_since_epoch()).count()));
-
-    // Hash all parent relationships
-    for (auto const p : tt.locations_.parents_) {
-      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(p)));
-    }
-
-    // Hash all location equivalences
-    for (auto const& eq : tt.locations_.equivalences_) {
-      fnv_combine(static_cast<std::uint64_t>(eq.size()));
-      for (auto const loc : eq) {
-        fnv_combine(static_cast<std::uint64_t>(cista::to_idx(loc)));
+    auto const locations = [&](auto const& buckets) {
+      add(buckets.size());
+      for (auto const& bucket : buckets) {
+        add(bucket.size());
+        for (auto const l : bucket) add(to_idx(l));
       }
-    }
-
-    // Hash all location children relationships
-    for (auto const& children : tt.locations_.children_) {
-      fnv_combine(static_cast<std::uint64_t>(children.size()));
-      for (auto const child : children) {
-        fnv_combine(static_cast<std::uint64_t>(cista::to_idx(child)));
-      }
-    }
-
-    // Hash location_routes_
-    for (auto const& routes : tt.location_routes_) {
-      fnv_combine(static_cast<std::uint64_t>(routes.size()));
-      for (auto const r : routes) {
-        fnv_combine(static_cast<std::uint64_t>(cista::to_idx(r)));
-      }
-    }
-
-    // Hash all footpaths_out and durations across profile layers
-    for (auto const& prf_footpaths : tt.locations_.footpaths_out_) {
-      fnv_combine(static_cast<std::uint64_t>(prf_footpaths.size()));
-      for (auto const& fps : prf_footpaths) {
-        fnv_combine(static_cast<std::uint64_t>(fps.size()));
-        for (auto const& fp_elem : fps) {
-          fnv_combine(static_cast<std::uint64_t>(cista::to_idx(fp_elem.target())));
-          fnv_combine(static_cast<std::uint64_t>(fp_elem.duration().count()));
-        }
-      }
-    }
-
-    // Hash all footpaths_in and durations across profile layers
-    for (auto const& prf_footpaths : tt.locations_.footpaths_in_) {
-      fnv_combine(static_cast<std::uint64_t>(prf_footpaths.size()));
-      for (auto const& fps : prf_footpaths) {
-        fnv_combine(static_cast<std::uint64_t>(fps.size()));
-        for (auto const& fp_elem : fps) {
-          fnv_combine(static_cast<std::uint64_t>(cista::to_idx(fp_elem.target())));
-          fnv_combine(static_cast<std::uint64_t>(fp_elem.duration().count()));
-        }
-      }
-    }
-
-    // Hash all route location sequences
+    };
+    add(tt.n_locations());
+    add(tt.date_range_.from_.time_since_epoch().count());
+    add(tt.date_range_.to_.time_since_epoch().count());
+    for (auto const l : tt.locations_.parents_) add(to_idx(l));
+    for (auto const t : tt.locations_.transfer_time_) add(t.count());
+    locations(tt.locations_.equivalences_);
+    locations(tt.locations_.children_);
+    locations(tt.location_routes_);
     for (auto const& seq : tt.route_location_seq_) {
-      fnv_combine(static_cast<std::uint64_t>(seq.size()));
-      for (auto const stp : seq) {
-        fnv_combine(static_cast<std::uint64_t>(stop{stp}.location_idx().v_));
-      }
+      add(seq.size());
+      for (auto const stp : seq) add(stp);  // includes boarding permissions
     }
-
-    // Hash route transport ranges
-    for (auto const& range : tt.route_transport_ranges_) {
-      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(range.from_)));
-      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(range.to_)));
-    }
-
-    // Hash route stop time ranges
-    for (auto const& range : tt.route_stop_time_ranges_) {
-      fnv_combine(static_cast<std::uint64_t>(range.from_));
-      fnv_combine(static_cast<std::uint64_t>(range.to_));
-    }
-
-    // Hash route stop times (event times)
-    for (auto const d : tt.route_stop_times_) {
-      fnv_combine(static_cast<std::uint64_t>(d.count()));
-    }
-
-    // Hash transport route mapping
-    for (auto const r : tt.transport_route_) {
-      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(r)));
-    }
-
-    // Hash transport traffic day indices
-    for (auto const td : tt.transport_traffic_days_) {
-      fnv_combine(static_cast<std::uint64_t>(cista::to_idx(td)));
-    }
-
-    // Hash bitfield bit blocks
-    for (auto const& bf : tt.bitfields_) {
-      fnv_combine(static_cast<std::uint64_t>(bf.size()));
-      for (std::size_t b = 0; b < bf.size(); b += 64) {
-        std::uint64_t word = 0;
-        for (std::size_t k = 0; k < 64 && (b + k) < bf.size(); ++k) {
-          if (bf.test(b + k)) {
-            word |= (1ULL << k);
+    for (auto const& profiles : {&tt.locations_.footpaths_out_, &tt.locations_.footpaths_in_}) {
+      for (auto const& buckets : *profiles) {
+        add(buckets.size());
+        for (auto const& bucket : buckets) {
+          add(bucket.size());
+          for (auto const& edge : bucket) {
+            add(to_idx(edge.target()));
+            add(edge.duration().count());
           }
         }
-        fnv_combine(word);
       }
     }
-
+    for (auto const& range : tt.route_transport_ranges_) {
+      add(to_idx(range.from_)); add(to_idx(range.to_));
+    }
+    // Hash the compressed representation without dereferencing mutable indices:
+    // even a malformed cache-invalidation fixture must not cause out-of-bounds reads.
+    for (auto const& rt : tt.route_times_) {
+      add(to_idx(rt.transports_.from_)); add(to_idx(rt.transports_.to_));
+      add(rt.pattern_start_); add(rt.n_patterns_);
+    }
+    for (auto const d : tt.transport_first_dep_) add(d.count());
+    for (auto const pattern : tt.transport_pattern_) add(pattern);
+    for (auto const d : tt.pattern_offsets_) add(d.count());
+    for (auto const r : tt.transport_route_) add(to_idx(r));
+    for (auto const td : tt.transport_traffic_days_) add(to_idx(td));
+    for (auto const& bf : tt.bitfields_) {
+      add(bf.size());
+      for (std::size_t i = 0; i < bf.size(); ++i) add(bf.test(i));
+    }
     return fp;
+  }
+
+  // Structural scans belong to setup only. After setup the index must remain
+  // immutable while queries hold it; revalidate after any construction-time edit.
+  bool validate_structure() {
+    profile_validated_.fill(false);
+    if (profiles_.size() > kNProfiles) return false;
+    for (std::size_t p = 0; p < profiles_.size(); ++p) {
+      auto const& profile = profiles_[p];
+      if (!profile.has_offsets_for(n_locations_)) return false;
+      for (auto const* edges : {&profile.out_edges_, &profile.in_edges_}) {
+        for (auto const& edge : *edges) {
+          if (to_idx(edge.target_) >= n_locations_ || edge.duration_ < duration_t{0} ||
+              edge.duration_ > footpath::kMaxDuration) return false;
+        }
+      }
+      profile_validated_[p] = !profile.transfer_time_fingerprint_.empty();
+    }
+    return true;
   }
 
   // register_location() keeps parents_ in lockstep with names_, so n_locations()
@@ -223,14 +177,13 @@ struct tad_transfer_index {
   bool has_shortcuts_for(profile_idx_t const prf_idx) const {
     auto const p_idx = cista::to_idx(prf_idx);
     return version_ == kVersion && p_idx < profiles_.size() &&
-           profiles_[p_idx].has_offsets_for(n_locations_) &&
-           !profiles_[p_idx].transfer_time_fingerprint_.empty();
+           profile_validated_[p_idx];
   }
 
   // O(timetable). Call exactly once, at index load or build time. Caches the
   // verdict so the query path can stay O(1).
   bool validate_for_timetable(timetable const& tt, int const witness_limit) {
-    timetable_validated_ = matches_witness_limit(witness_limit) && is_valid_for_tt(tt);
+    timetable_validated_ = validate_structure() && matches_witness_limit(witness_limit) && is_valid_for_tt(tt);
     return timetable_validated_;
   }
 
@@ -356,6 +309,7 @@ struct tad_transfer_index {
     if (in.peek() != std::ifstream::traits_type::eof()) {
       return std::nullopt;
     }
+    if (!idx.validate_structure()) return std::nullopt;
     return idx;
   }
 };

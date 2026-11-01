@@ -1,4 +1,5 @@
 #include "nigiri/loader/gtfs/stop.h"
+#include "nigiri/loader/import_context.h"
 
 #include <algorithm>
 #include <string>
@@ -95,6 +96,7 @@ struct stop {
   std::string_view id_;
   cista::raw::generic_string name_;
   std::string_view platform_code_;
+  std::string_view stop_code_;
   std::string_view desc_;
   geo::latlng coord_;
   std::string_view timezone_;
@@ -104,6 +106,7 @@ struct stop {
   location_idx_t location_{location_idx_t::invalid()};
   std::vector<footpath> footpaths_;
   std::optional<duration_t> transfer_time_;
+  bool wheelchair_boarding_;
 };
 
 enum class stop_type { kRegular, kGeneratedParent };
@@ -202,15 +205,17 @@ seated_transfers_map_t read_transfers(stop_map_t& stops,
   return seated_transfers;
 }
 
-std::pair<stops_map_t, seated_transfers_map_t> read_stops(
-    source_idx_t const src,
-    timetable& tt,
-    translator& i18n,
-    tz_map& timezones,
-    std::string_view stops_file_content,
-    std::string_view transfers_file_content,
-    unsigned link_stop_distance,
-    script_runner const& r) {
+std::tuple<stops_map_t, seated_transfers_map_t, location_accessible_map_t>
+read_stops(source_idx_t const src,
+           timetable& tt,
+           import_context& ctx,
+           translator& i18n,
+           tz_map& timezones,
+           std::string_view stops_file_content,
+           std::string_view transfers_file_content,
+           unsigned link_stop_distance,
+           duration_t const default_transfer_time,
+           script_runner const& r) {
   auto const timer = scoped_timer{"gtfs.loader.stops"};
 
   auto const progress_tracker = utl::get_active_progress_tracker();
@@ -225,9 +230,11 @@ std::pair<stops_map_t, seated_transfers_map_t> read_stops(
     utl::csv_col<utl::cstr, UTL_NAME("stop_timezone")> timezone_;
     utl::csv_col<utl::cstr, UTL_NAME("parent_station")> parent_station_;
     utl::csv_col<utl::cstr, UTL_NAME("platform_code")> platform_code_;
+    utl::csv_col<utl::cstr, UTL_NAME("stop_code")> stop_code_;
     utl::csv_col<utl::cstr, UTL_NAME("stop_desc")> stop_desc_;
     utl::csv_col<utl::cstr, UTL_NAME("stop_lat")> lat_;
     utl::csv_col<utl::cstr, UTL_NAME("stop_lon")> lon_;
+    utl::csv_col<uint8_t, UTL_NAME("wheelchair_boarding")> wheelchair_boarding_;
   };
 
   stops_map_t locations;
@@ -254,8 +261,13 @@ std::pair<stops_map_t, seated_transfers_map_t> read_stops(
             std::clamp(utl::parse<double>(s.lat_->trim()), -90.0, 90.0),
             std::clamp(utl::parse<double>(s.lon_->trim()), -180.0, 180.0)};
         new_stop->platform_code_ = s.platform_code_->view();
+        new_stop->stop_code_ = s.stop_code_->view();
         new_stop->desc_ = s.stop_desc_->view();
         new_stop->timezone_ = s.timezone_->trim().view();
+
+        // we treat unknown as yes, because this data is currently not available
+        // commonly enough
+        new_stop->wheelchair_boarding_ = s.wheelchair_boarding_.val() != 2;
 
         if (!s.parent_station_->trim().empty()) {
           auto const parent =
@@ -301,6 +313,7 @@ std::pair<stops_map_t, seated_transfers_map_t> read_stops(
   }
 
   auto transfers = read_transfers(stops, transfers_file_content);
+  location_accessible_map_t accessible;
   for (auto const& [id, s] : stops) {
     auto loc = location{
         tt,
@@ -308,16 +321,18 @@ std::pair<stops_map_t, seated_transfers_map_t> read_stops(
         id,
         i18n.get(t::kStops, f::kStopName, s->name_.view(), s->id_),
         i18n.get(t::kStops, f::kPlatformCode, s->platform_code_, s->id_),
+        i18n.get(t::kStops, f::kStopCode, s->stop_code_, s->id_),
         i18n.get(t::kStops, f::kStopDesc, s->desc_, s->id_),
         s->coord_,
         s->parent_ == nullptr ? location_type::kStation : location_type::kTrack,
         location_idx_t::invalid(),
         s->timezone_.empty() ? timezone_idx_t::invalid()
                              : get_tz_idx(tt, timezones, s->timezone_),
-        s->transfer_time_.value_or(2_minutes),
+        s->transfer_time_.value_or(default_transfer_time),
         timezones};
     if (process_location(r, loc)) {
-      locations.emplace(id, s->location_ = register_location(tt, loc));
+      locations.emplace(id, s->location_ = register_location(tt, ctx, loc));
+      accessible.insert({s->location_, s->wheelchair_boarding_});
     }
   }
 
@@ -340,27 +355,25 @@ std::pair<stops_map_t, seated_transfers_map_t> read_stops(
         tt.locations_.parents_[s->location_] = s->parent_->location_;
       }
       for (auto const& c : s->children_) {
-        tt.locations_.children_[s->location_].emplace_back(c->location_);
+        ctx.children_[s->location_].emplace_back(c->location_);
       }
 
       // GTFS footpaths
       for (auto const& fp : s->footpaths_) {
-        tt.locations_.preprocessing_footpaths_out_[s->location_].emplace_back(
+        ctx.preprocessing_footpaths_out_[s->location_].emplace_back(
             fp.to_->location_, fp.duration_);
-        tt.locations_.preprocessing_footpaths_in_[fp.to_->location_]
-            .emplace_back(s->location_, fp.duration_);
+        ctx.preprocessing_footpaths_in_[fp.to_->location_].emplace_back(
+            s->location_, fp.duration_);
       }
     }
 
     // Make GTFS footpaths symmetric (if not already).
     for (auto const& [id, s] : stops) {
       for (auto const& fp : s->footpaths_) {
-        add_if_not_exists(
-            tt.locations_.preprocessing_footpaths_out_[fp.to_->location_],
-            {s->location_, fp.duration_});
-        add_if_not_exists(
-            tt.locations_.preprocessing_footpaths_in_[s->location_],
-            {fp.to_->location_, fp.duration_});
+        add_if_not_exists(ctx.preprocessing_footpaths_out_[fp.to_->location_],
+                          {s->location_, fp.duration_});
+        add_if_not_exists(ctx.preprocessing_footpaths_in_[s->location_],
+                          {fp.to_->location_, fp.duration_});
       }
     }
 
@@ -378,25 +391,22 @@ std::pair<stops_map_t, seated_transfers_map_t> read_stops(
           continue;
         }
 
-        tt.locations_.equivalences_[s->location_].emplace_back(eq->location_);
-        add_if_not_exists(
-            tt.locations_.preprocessing_footpaths_out_[s->location_],
-            {eq->location_, duration});
-        add_if_not_exists(
-            tt.locations_.preprocessing_footpaths_in_[eq->location_],
-            {s->location_, duration});
-        add_if_not_exists(
-            tt.locations_.preprocessing_footpaths_out_[eq->location_],
-            {s->location_, duration});
-        add_if_not_exists(
-            tt.locations_.preprocessing_footpaths_in_[s->location_],
-            {eq->location_, duration});
+        ctx.equivalences_[s->location_].emplace_back(eq->location_);
+        add_if_not_exists(ctx.preprocessing_footpaths_out_[s->location_],
+                          {eq->location_, duration});
+        add_if_not_exists(ctx.preprocessing_footpaths_in_[eq->location_],
+                          {s->location_, duration});
+        add_if_not_exists(ctx.preprocessing_footpaths_out_[eq->location_],
+                          {s->location_, duration});
+        add_if_not_exists(ctx.preprocessing_footpaths_in_[s->location_],
+                          {eq->location_, duration});
       }
       progress_tracker->increment();
     }
   }
 
-  return std::pair{std::move(locations), std::move(transfers)};
+  return std::tuple{std::move(locations), std::move(transfers),
+                    std::move(accessible)};
 }
 
 }  // namespace nigiri::loader::gtfs

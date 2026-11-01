@@ -2,6 +2,7 @@
 
 #include "nigiri/loader/gtfs/load_timetable.h"
 #include "nigiri/loader/init_finish.h"
+#include "nigiri/loader/import_context.h"
 #include "nigiri/rt/create_rt_timetable.h"
 #include "nigiri/rt/gtfsrt_update.h"
 #include "nigiri/rt/rt_timetable.h"
@@ -93,8 +94,9 @@ TEST(routing, tad_rt_delay_parity) {
   
   timetable tt;
   tt.date_range_ = {date::sys_days{2019_y / March / 25}, date::sys_days{2019_y / November / 1}};
-  load_timetable({}, source_idx_t{0}, test_files(), tt);
-  finalize(tt);
+  auto ctx = import_context{tt};
+  load_timetable({}, source_idx_t{0}, test_files(), tt, ctx);
+  finalize(tt, ctx);
   
   auto rtt = rt::create_rt_timetable(tt, date::sys_days{2019_y / May / 3});
   
@@ -138,8 +140,9 @@ TEST(routing, tad_rt_cancel_parity) {
   
   timetable tt;
   tt.date_range_ = {date::sys_days{2019_y / March / 25}, date::sys_days{2019_y / November / 1}};
-  load_timetable({}, source_idx_t{0}, test_files(), tt);
-  finalize(tt);
+  auto ctx = import_context{tt};
+  load_timetable({}, source_idx_t{0}, test_files(), tt, ctx);
+  finalize(tt, ctx);
   
   auto rtt = rt::create_rt_timetable(tt, date::sys_days{2019_y / May / 3});
   
@@ -180,8 +183,9 @@ TEST(routing, tad_rt_added_trip_parity) {
   
   timetable tt;
   tt.date_range_ = {date::sys_days{2019_y / March / 25}, date::sys_days{2019_y / November / 1}};
-  load_timetable({}, source_idx_t{0}, test_files(), tt);
-  finalize(tt);
+  auto ctx = import_context{tt};
+  load_timetable({}, source_idx_t{0}, test_files(), tt, ctx);
+  finalize(tt, ctx);
   
   auto rtt = rt::create_rt_timetable(tt, date::sys_days{2019_y / May / 3});
   
