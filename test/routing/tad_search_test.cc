@@ -3,6 +3,7 @@
 #include "nigiri/loader/hrd/load_timetable.h"
 #include "nigiri/loader/init_finish.h"
 #include "nigiri/loader/import_context.h"
+#include "nigiri/loader/build_lb_graph.h"
 
 #include "../loader/hrd/hrd_timetable.h"
 
@@ -1398,6 +1399,12 @@ TEST(routing, tad_ultra_witness_boarding_contract) {
       // two-trip journey is permitted. RAPTOR expects closed transfer edges;
       // add the independently known 3 + 4 minute path only for its input.
       add(b, c, 7_minutes);
+      // These fixture edges were added after finalize(), so rebuild RAPTOR's
+      // profile-specific lower bounds too (including the wheelchair profile).
+      tt.fwd_search_lb_graph_[p].clear();
+      tt.bwd_search_lb_graph_[p].clear();
+      build_lb_graph<direction::kForward>(tt, p);
+      build_lb_graph<direction::kBackward>(tt, p);
       routing::query q;
       q.start_time_ = unixtime_t{sys_days{2020_y / March / 30}};
       q.start_.push_back(routing::offset{a, 0_minutes, 0});
