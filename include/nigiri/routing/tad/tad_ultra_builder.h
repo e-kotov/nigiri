@@ -70,7 +70,7 @@ struct tad_ultra_builder {
 
     for (profile_idx_t prf = 0; prf < kNProfiles; ++prf) {
       auto& prf_shortcuts = idx.profiles_[cista::to_idx(prf)];
-      prf_shortcuts.transfer_time_fingerprint_ = "ultra_conservative_shortcuts_v2";
+      prf_shortcuts.transfer_time_fingerprint_ = "ultra_conservative_shortcuts_v3";
 
       auto const grouping = build_station_grouping(tt_, prf);
 
@@ -369,8 +369,9 @@ private:
               bool found_stop = false;
               for (std::size_t s = 0; s < stop_seq.size(); ++s) {
                 auto const loc_s = stop{stop_seq[s]}.location_idx();
-                if (loc_s == u || (cista::to_idx(loc_s) < tt_.locations_.parents_.size() &&
-                                  tt_.locations_.parents_[loc_s] == u)) {
+                if (stop{stop_seq[s]}.in_allowed(prf) &&
+                    (loc_s == u || (cista::to_idx(loc_s) < tt_.locations_.parents_.size() &&
+                                   tt_.locations_.parents_[loc_s] == u))) {
                   stop_idx = static_cast<stop_idx_t>(s);
                   found_stop = true;
                   break;
@@ -416,6 +417,7 @@ private:
               auto const transports = tt_.route_transport_ranges_[r];
 
               for (std::size_t i = 0; i < stop_seq.size(); ++i) {
+                if (!stop{stop_seq[i]}.in_allowed(prf)) continue;
                 auto const board_stop = stop{stop_seq[i]}.location_idx();
                 auto const arr_0_board = get_arr_0_resolved(board_stop);
                 if (arr_0_board == kMaxTime) continue;
@@ -431,6 +433,7 @@ private:
                     auto const dep = tt_.event_time(transport{t, day}, board_stop_idx, event_type::kDep);
                     if (dep >= arr_0_board) {
                       for (std::size_t j = i + 1; j < stop_seq.size(); ++j) {
+                        if (!stop{stop_seq[j]}.out_allowed(prf)) continue;
                         auto const arr_stop = stop{stop_seq[j]}.location_idx();
                         auto const arr_stop_idx = static_cast<stop_idx_t>(j);
                         auto const arr_t = tt_.event_time(transport{t, day}, arr_stop_idx, event_type::kArr);
@@ -509,6 +512,7 @@ private:
               auto const transports = tt_.route_transport_ranges_[r];
 
               for (std::size_t i = 0; i < stop_seq.size(); ++i) {
+                if (!stop{stop_seq[i]}.in_allowed(prf)) continue;
                 auto const board_stop = stop{stop_seq[i]}.location_idx();
                 auto const arr_1_board = get_arr_1_resolved(board_stop);
                 if (arr_1_board == kMaxTime) continue;
@@ -526,6 +530,7 @@ private:
                       auto const transfer_parent = get_transfer_parent_resolved(board_stop);
 
                       for (std::size_t j = i + 1; j < stop_seq.size(); ++j) {
+                        if (!stop{stop_seq[j]}.out_allowed(prf)) continue;
                         auto const arr_stop = stop{stop_seq[j]}.location_idx();
                         auto const arr_stop_idx = static_cast<stop_idx_t>(j);
                         auto const arr_t = tt_.event_time(transport{t, day}, arr_stop_idx, event_type::kArr);

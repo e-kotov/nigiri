@@ -48,7 +48,7 @@ struct tad_profile_shortcuts {
 };
 
 struct tad_transfer_index {
-  static constexpr std::uint32_t kVersion = 4U;
+  static constexpr std::uint32_t kVersion = 5U;
 
   std::uint32_t version_{kVersion};
   std::uint32_t n_locations_{0U};

@@ -1086,10 +1086,10 @@ TEST(routing, tad_station_grouping_exhaustive_directed_graphs) {
           auto const edge = encoding % 3U;
           encoding /= 3U;
           if (edge == 0U) continue;
-          // Reverse the second profile to exercise profile-specific direction.
+          // Reverse edges and swap zero/positive costs in the second profile.
           auto const from = p == 0 ? u : v;
           auto const to = p == 0 ? v : u;
-          auto const duration = edge == 1U ? 0_minutes : 1_minutes;
+          auto const duration = edge == (p == 0 ? 1U : 2U) ? 0_minutes : 1_minutes;
           tt.locations_.footpaths_out_[p][location_idx_t{from}].push_back(
               footpath{location_idx_t{to}, duration});
           reachable[from][to] = duration == 0_minutes;
@@ -1126,7 +1126,7 @@ TEST(routing, tad_ultra_builder_valid_index) {
   auto const idx = routing::build_tad_ultra_index(tt, 15);
   EXPECT_TRUE(idx.is_valid_for_query(profile_idx_t{0}));
   EXPECT_EQ(tt.n_locations(), idx.n_locations_);
-  EXPECT_EQ("ultra_conservative_shortcuts_v2", idx.profiles_[0].transfer_time_fingerprint_);
+  EXPECT_EQ("ultra_conservative_shortcuts_v3", idx.profiles_[0].transfer_time_fingerprint_);
 }
 
 TEST(routing, tad_ultra_shortcut_scalar_parity) {
@@ -1346,6 +1346,7 @@ TEST(routing, tad_ultra_witness_boarding_contract) {
            scenario{"second boarding forbidden", 2, true, false, false, false},
            scenario{"second alighting forbidden", 3, false, false, false, false},
            scenario{"wheelchair boarding forbidden", 2, true, true, false, false},
+           scenario{"wheelchair alighting forbidden", 3, false, true, false, false},
            scenario{"one-way zero source link", -1, false, false, true, true}}) {
     SCOPED_TRACE(test.name_);
     for (auto const p : {profile_idx_t{0}, kWheelchairProfile}) {
@@ -1364,6 +1365,9 @@ TEST(routing, tad_ultra_witness_boarding_contract) {
       auto const d = tt.locations_.location_id_to_idx_.at({"0000005", src});
       for (auto& buffer : tt.locations_.transfer_time_) buffer = 0_minutes;
       for (route_idx_t r{0}; r != tt.route_location_seq_.size(); ++r) {
+        // Vehicles are accessible: these cases isolate stop permissions.
+        tt.route_flags_[route_flag::kWheelchairAccessible].set(to_idx(r) * 2U, true);
+        tt.route_flags_[route_flag::kWheelchairAccessible].set(to_idx(r) * 2U + 1U, false);
         for (auto& value : tt.route_location_seq_[r]) {
           auto const location = stop{value}.location_idx();
           auto const denied = test.denied_stop_ == (location == a ? 0 : location == b ? 1 : location == c ? 2 : 3);
@@ -1384,6 +1388,7 @@ TEST(routing, tad_ultra_witness_boarding_contract) {
       if (test.one_way_zero_) add(a, location_idx_t{0}, 0_minutes);
 
       auto const idx = routing::build_tad_ultra_index(tt, 15);
+      ASSERT_TRUE(idx.is_valid_for_query(p));
       auto found = false;
       auto const& profile = idx.profiles_[p];
       for (auto i = profile.out_offsets_[to_idx(b)]; i != profile.out_offsets_[to_idx(b) + 1]; ++i) {

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "nigiri/timetable.h"
@@ -31,97 +33,86 @@ struct station_grouping {
   }
 };
 
-struct dsu {
-  explicit dsu(std::size_t const n) : parent_(n) {
-    for (std::size_t i = 0; i < n; ++i) {
-      parent_[i] = static_cast<std::uint32_t>(i);
-    }
-  }
-
-  std::uint32_t find(std::uint32_t const i) {
-    auto root = i;
-    while (root != parent_[root]) {
-      root = parent_[root];
-    }
-    auto curr = i;
-    while (curr != root) {
-      auto const next = parent_[curr];
-      parent_[curr] = root;
-      curr = next;
-    }
-    return root;
-  }
-
-  void unite(std::uint32_t const i, std::uint32_t const j) {
-    auto const root_i = find(i);
-    auto const root_j = find(j);
-    if (root_i != root_j) {
-      if (root_i < root_j) {
-        parent_[root_j] = root_i;
-      } else {
-        parent_[root_i] = root_j;
-      }
-    }
-  }
-
-  std::vector<std::uint32_t> parent_;
-};
-
+// A representative may replace a source only if every member can reach every
+// other member at zero cost in this profile's directed transfer graph. Parent
+// stations and equivalence metadata alone do not establish that property.
 inline station_grouping build_station_grouping(timetable const& tt,
-                                                profile_idx_t const prf) {
+                                               profile_idx_t const prf) {
   auto const n_locs = tt.n_locations();
   station_grouping grouping;
   grouping.representative_of_stop_.resize(n_locs, location_idx_t::invalid());
 
-  dsu sets(n_locs);
-
-  for (std::size_t i = 0; i < n_locs; ++i) {
-    auto const l = location_idx_t{static_cast<std::uint32_t>(i)};
-    auto const p = tt.locations_.parents_[l];
-    if (p != location_idx_t::invalid() && cista::to_idx(p) < n_locs) {
-      sets.unite(static_cast<std::uint32_t>(i), cista::to_idx(p));
-    }
-    for (auto const eq : tt.locations_.equivalences_[l]) {
-      if (cista::to_idx(eq) < n_locs) {
-        sets.unite(static_cast<std::uint32_t>(i), cista::to_idx(eq));
-      }
-    }
-  }
-
+  std::vector<std::vector<std::uint32_t>> outgoing(n_locs), incoming(n_locs);
   if (prf < tt.locations_.footpaths_out_.size()) {
-    auto const& footpaths_out = tt.locations_.footpaths_out_[prf];
-    for (std::size_t i = 0; i < n_locs; ++i) {
-      auto const l = location_idx_t{static_cast<std::uint32_t>(i)};
-      if (i < footpaths_out.size()) {
-        for (auto const& fp : footpaths_out[l]) {
-          if (fp.duration() == 0_minutes) {
-            auto const target = fp.target();
-            if (cista::to_idx(target) < n_locs) {
-              sets.unite(static_cast<std::uint32_t>(i), cista::to_idx(target));
-            }
-          }
+    auto const& graph = tt.locations_.footpaths_out_[prf];
+    for (std::size_t u = 0; u < n_locs && u < graph.size(); ++u) {
+      for (auto const& edge : graph[location_idx_t{static_cast<std::uint32_t>(u)}]) {
+        auto const v = cista::to_idx(edge.target());
+        if (edge.duration() == 0_minutes && v < n_locs) {
+          outgoing[u].push_back(v);
+          incoming[v].push_back(static_cast<std::uint32_t>(u));
         }
       }
     }
   }
 
-  std::vector<std::vector<location_idx_t>> members_by_rep(n_locs);
-  for (std::size_t i = 0; i < n_locs; ++i) {
-    auto const rep_idx = sets.find(static_cast<std::uint32_t>(i));
-    auto const rep = location_idx_t{rep_idx};
-    grouping.representative_of_stop_[i] = rep;
-    members_by_rep[rep_idx].push_back(location_idx_t{static_cast<std::uint32_t>(i)});
-  }
-
-  for (std::size_t i = 0; i < n_locs; ++i) {
-    if (!members_by_rep[i].empty()) {
-      station_grouping::station st;
-      st.representative_ = location_idx_t{static_cast<std::uint32_t>(i)};
-      st.member_stops_ = std::move(members_by_rep[i]);
-      grouping.stations_.push_back(std::move(st));
+  // Iterative Kosaraju traversal avoids recursion on large
+  // station/transfer networks. The reverse graph is derived from outgoing
+  // footpaths, so no independently populated incoming table is required.
+  std::vector<bool> seen(n_locs, false);
+  std::vector<std::uint32_t> finish;
+  std::vector<std::pair<std::uint32_t, std::size_t>> dfs;
+  finish.reserve(n_locs);
+  for (std::size_t source = 0; source < n_locs; ++source) {
+    if (seen[source]) continue;
+    seen[source] = true;
+    dfs.emplace_back(static_cast<std::uint32_t>(source), 0U);
+    while (!dfs.empty()) {
+      auto& [u, next] = dfs.back();
+      if (next == outgoing[u].size()) {
+        finish.push_back(u);
+        dfs.pop_back();
+      } else {
+        auto const v = outgoing[u][next++];
+        if (!seen[v]) {
+          seen[v] = true;
+          dfs.emplace_back(v, 0U);
+        }
+      }
     }
   }
 
+  std::fill(seen.begin(), seen.end(), false);
+  std::vector<std::uint32_t> pending;
+  for (auto it = finish.rbegin(); it != finish.rend(); ++it) {
+    if (seen[*it]) continue;
+    station_grouping::station station;
+    auto representative = *it;
+    pending.push_back(*it);
+    seen[*it] = true;
+    while (!pending.empty()) {
+      auto const u = pending.back();
+      pending.pop_back();
+      representative = std::min(representative, u);
+      station.member_stops_.push_back(location_idx_t{u});
+      for (auto const v : incoming[u]) {
+        if (!seen[v]) {
+          seen[v] = true;
+          pending.push_back(v);
+        }
+      }
+    }
+    station.representative_ = location_idx_t{representative};
+    std::sort(station.member_stops_.begin(), station.member_stops_.end());
+    for (auto const member : station.member_stops_) {
+      grouping.representative_of_stop_[cista::to_idx(member)] = station.representative_;
+    }
+    grouping.stations_.push_back(std::move(station));
+  }
+  std::sort(grouping.stations_.begin(), grouping.stations_.end(),
+            [](auto const& a, auto const& b) {
+              return a.representative_ < b.representative_;
+            });
   return grouping;
 }
 
