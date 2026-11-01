@@ -1926,7 +1926,6 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
   for (auto const& c : std::vector<scenario>{
            {"terminal_egress", first, "0000001", "0000004", 7_minutes},
            {"terminal_access", second, "0000002", "0000005", 7_minutes},
-           {"intermodal_access", second, "0000002", "0000005", 7_minutes},
            {"direct_walk", first, "0000002", "0000004", 7_minutes},
            {"long_intermediate", first + second, "0000001", "0000005", 16_minutes}}) {
     SCOPED_TRACE(c.name_);
@@ -1958,26 +1957,8 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
           loc(dir == direction::kForward ? c.from_ : c.to_), 0_minutes, 0});
       q.destination_.push_back(routing::offset{
           loc(dir == direction::kForward ? c.to_ : c.from_), 0_minutes, 0});
-      auto const intermodal = std::string_view{c.name_} == "intermodal_access";
-      if (intermodal) {
-        if (dir == direction::kForward) {
-          q.start_match_mode_ = routing::location_match_mode::kIntermodal;
-          q.start_.front() = routing::offset{loc(c.from_), 10_minutes, 0};
-        } else {
-          q.dest_match_mode_ = routing::location_match_mode::kIntermodal;
-          q.destination_.front() = routing::offset{loc(c.from_), 10_minutes, 0};
-        }
-      }
       routing::search_state s_base, s_idx;
       routing::tad_state t_base, t_idx;
-      if (intermodal && dir == direction::kForward && expand) {
-        // The upstream query contract rejects this combination. Do not weaken
-        // sanitization to turn an invalid reviewer counterexample into a route.
-        EXPECT_ANY_THROW(routing::tad_route(tt, nullptr, s_base, t_base, q, dir));
-        EXPECT_ANY_THROW(routing::tad_route(tt, nullptr, s_idx, t_idx, q, dir,
-                                          std::nullopt, &idx));
-        continue;
-      }
       auto const base_result = routing::tad_route(
           tt, nullptr, s_base, t_base, q, dir);
       auto const indexed_result = routing::tad_route(
@@ -1988,12 +1969,7 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
         if (result->journeys_->empty()) continue;
         auto const& journey = *result->journeys_->begin();
         ASSERT_FALSE(journey.legs_.empty());
-        EXPECT_EQ(intermodal ? get_special_station(special_station::kStart) : loc(c.from_),
-                  journey.legs_.front().from_);
-        if (intermodal) {
-          EXPECT_EQ(10_minutes, journey.legs_.front().arr_time_ - journey.legs_.front().dep_time_);
-          EXPECT_TRUE(std::holds_alternative<routing::offset>(journey.legs_.front().uses_));
-        }
+        EXPECT_EQ(loc(c.from_), journey.legs_.front().from_);
         EXPECT_EQ(loc(c.to_), journey.legs_.back().to_);
         EXPECT_LE(journey.start_time_, journey.dest_time_);
         if (dir == direction::kForward) {
@@ -2060,5 +2036,57 @@ TEST(routing, tad_ultra_transfer_graph_distance_invariant) {
     for (auto const fwd : {true, false}) {
       EXPECT_EQ(distances(base_provider, fwd), distances(indexed_provider, fwd));
     }
+  }
+}
+
+TEST(routing, tad_intermodal_offset_contract) {
+  constexpr auto src = source_idx_t{0U};
+  timetable tt;
+  tt.date_range_ = full_period();
+  import_context ctx{tt};
+  register_special_stations(tt, ctx);
+  load_timetable(src, loader::hrd::hrd_5_20_26, files_two_routes_multihop(), tt, ctx);
+  finalize(tt, ctx);
+  auto const c = tt.locations_.location_id_to_idx_.at({"0000004", src});
+  auto const d = tt.locations_.location_id_to_idx_.at({"0000005", src});
+  auto const idx = routing::build_tad_ultra_index(tt, 15);
+  for (auto const dir : {direction::kForward, direction::kBackward}) {
+    SCOPED_TRACE(dir == direction::kForward ? "forward" : "backward");
+    routing::query q;
+    q.start_match_mode_ = routing::location_match_mode::kIntermodal;
+    q.dest_match_mode_ = routing::location_match_mode::kIntermodal;
+    q.start_time_ = unixtime_t{sys_days{2020_y / March / 30}} +
+                    (dir == direction::kForward ? 0_hours : 6_hours);
+    // Intermodal callers supply street-router offsets to boarding/alighting
+    // stops, including any preceding walking. Do not provide only an unserved
+    // intermediate walking vertex and assume RAPTOR expands its street access.
+    q.start_.push_back(routing::offset{dir == direction::kForward ? c : d,
+                                      dir == direction::kForward ? 17_minutes : 11_minutes,
+                                      dir == direction::kForward ? 99U : 77U});
+    q.destination_.push_back(routing::offset{dir == direction::kForward ? d : c,
+                                            dir == direction::kForward ? 11_minutes : 17_minutes,
+                                            dir == direction::kForward ? 77U : 99U});
+    auto const oracle = nigiri::test::raptor_search(tt, nullptr, q, dir);
+    ASSERT_FALSE(oracle.empty());
+    routing::search_state s;
+    routing::tad_state state;
+    auto const result = routing::tad_route(tt, nullptr, s, state, q, dir, std::nullopt, &idx);
+    ASSERT_FALSE(result.journeys_->empty());
+    auto const& j = *result.journeys_->begin();
+    ASSERT_GE(j.legs_.size(), 3U);
+    ASSERT_TRUE(std::holds_alternative<routing::offset>(j.legs_.front().uses_));
+    ASSERT_TRUE(std::holds_alternative<routing::offset>(j.legs_.back().uses_));
+    EXPECT_EQ(17_minutes, j.legs_.front().arr_time_ - j.legs_.front().dep_time_);
+    EXPECT_EQ(11_minutes, j.legs_.back().arr_time_ - j.legs_.back().dep_time_);
+    EXPECT_TRUE(routing::matches(tt, routing::location_match_mode::kIntermodal, c,
+                                 j.legs_.front().to_));
+    EXPECT_TRUE(routing::matches(tt, routing::location_match_mode::kIntermodal, d,
+                                 j.legs_.back().from_));
+    EXPECT_EQ(oracle.begin()->dest_time_, j.dest_time_);
+    if (dir == direction::kBackward) EXPECT_EQ(1U, result.algo_stats_.at("tad_fallback_raptor"));
+    // Upstream explicitly rejects mixing intermodal offsets and initial TT
+    // footpath expansion. Verify rejection in both search directions.
+    q.use_start_footpaths_ = true;
+    EXPECT_ANY_THROW(routing::tad_route(tt, nullptr, s, state, q, dir, std::nullopt, &idx));
   }
 }
