@@ -1073,7 +1073,7 @@ TEST(routing, tad_station_grouping_exhaustive_directed_graphs) {
     timetable tt;
     tt.locations_.names_.resize(3U);
     tt.locations_.parents_.resize(3U, location_idx_t::invalid());
-    for (unsigned u = 0; u != 3U; ++u) tt.locations_.equivalences_.emplace_back();
+    for (unsigned u = 0; u != 3U; ++u) tt.locations_.equivalences_.emplace_back(std::vector<location_idx_t>{});
     for (profile_idx_t p = 0; p != 2; ++p) {
       tt.locations_.footpaths_out_[p].resize(3U);
       bool reachable[3][3]{};
@@ -1348,7 +1348,7 @@ TEST(routing, tad_ultra_witness_boarding_contract) {
            scenario{"one-way zero source link", -1, false, false, true, true}}) {
     SCOPED_TRACE(test.name_);
     for (auto const p : {profile_idx_t{0}, kWheelchairProfile}) {
-      SCOPED_TRACE(to_idx(p));
+      SCOPED_TRACE(cista::to_idx(p));
       constexpr auto src = source_idx_t{0U};
       timetable tt;
       tt.date_range_ = full_period();
@@ -1362,7 +1362,7 @@ TEST(routing, tad_ultra_witness_boarding_contract) {
       auto const c = tt.locations_.location_id_to_idx_.at({"0000004", src});
       auto const d = tt.locations_.location_id_to_idx_.at({"0000005", src});
       for (auto& buffer : tt.locations_.transfer_time_) buffer = 0_minutes;
-      for (route_idx_t r = 0; r != tt.route_location_seq_.size(); ++r) {
+      for (route_idx_t r{0}; r != tt.route_location_seq_.size(); ++r) {
         for (auto& value : tt.route_location_seq_[r]) {
           auto const location = stop{value}.location_idx();
           auto const denied = test.denied_stop_ == (location == a ? 0 : location == b ? 1 : location == c ? 2 : 3);
