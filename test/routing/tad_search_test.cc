@@ -1970,6 +1970,14 @@ TEST(routing, tad_ultra_endpoint_and_long_walk_parity) {
       }
       routing::search_state s_base, s_idx;
       routing::tad_state t_base, t_idx;
+      if (intermodal && dir == direction::kForward && expand) {
+        // The upstream query contract rejects this combination. Do not weaken
+        // sanitization to turn an invalid reviewer counterexample into a route.
+        EXPECT_ANY_THROW(routing::tad_route(tt, nullptr, s_base, t_base, q, dir));
+        EXPECT_ANY_THROW(routing::tad_route(tt, nullptr, s_idx, t_idx, q, dir,
+                                          std::nullopt, &idx));
+        continue;
+      }
       auto const base_result = routing::tad_route(
           tt, nullptr, s_base, t_base, q, dir);
       auto const indexed_result = routing::tad_route(
