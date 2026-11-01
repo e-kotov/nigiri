@@ -2083,7 +2083,9 @@ TEST(routing, tad_intermodal_offset_contract) {
     EXPECT_TRUE(routing::matches(tt, routing::location_match_mode::kIntermodal, d,
                                  j.legs_.back().from_));
     EXPECT_EQ(oracle.begin()->dest_time_, j.dest_time_);
-    if (dir == direction::kBackward) EXPECT_EQ(1U, result.algo_stats_.at("tad_fallback_raptor"));
+    if (dir == direction::kBackward) {
+      EXPECT_EQ(1U, result.algo_stats_.at("tad_fallback_raptor"));
+    }
     // Upstream explicitly rejects mixing intermodal offsets and initial TT
     // footpath expansion. Verify rejection in both search directions.
     q.use_start_footpaths_ = true;
