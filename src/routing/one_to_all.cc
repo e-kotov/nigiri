@@ -57,10 +57,13 @@ void finish_one_to_all(delta_t const worst_at_dest, raptor_state& state) {
   auto best = state.get_best<kVias>();
   auto& arrivals = state.one_to_all_arrivals_;
 
+  // Rows from one_to_all_dirty_rows_ on were not reached by this query and
+  // are kInvalid already.
+  auto const n_rows = state.one_to_all_dirty_rows_;
   for (auto l = location_idx_t{0U}; l != state.n_locations_; ++l) {
     auto& b = best[to_idx(l)][kVias];
     b = kInvalid;
-    for (auto k = 0U; k != kMaxTransfers + 2U; ++k) {
+    for (auto k = 0U; k != n_rows; ++k) {
       auto& t = arrivals[k][to_idx(l)];
       if (is_better(t, b) && !is_better(worst_at_dest, t)) {
         b = t;
@@ -72,16 +75,15 @@ void finish_one_to_all(delta_t const worst_at_dest, raptor_state& state) {
 }
 
 template <direction SearchDir, bool Rt>
-raptor_state one_to_all(timetable const& tt,
-                        rt_timetable const* rtt,
-                        query const& q) {
+void one_to_all(timetable const& tt,
+                rt_timetable const* rtt,
+                query const& q,
+                raptor_state& state) {
   utl::verify(std::holds_alternative<unixtime_t>(q.start_time_),
               "Start-time must be a time point (unixtime_t)");
   utl::verify(q.via_stops_.empty(),
               "One-to-All search not supported with vias");
   auto const& start_time = std::get<unixtime_t>(q.start_time_);
-
-  auto state = raptor_state{};
 
   auto is_dest = bitvec{rtt == nullptr ? tt.n_locations() : rtt->n_locations()};
   auto is_via = std::array<bitvec, kMaxVias>{};
@@ -116,19 +118,27 @@ raptor_state one_to_all(timetable const& tt,
   auto const worst_at_dest = r.to_delta(worst_time_at_dest);
   run_raptor(std::move(r), tt, rtt, start_time, worst_time_at_dest, q);
   finish_one_to_all<SearchDir>(worst_at_dest, state);
+}
 
-  return state;
+template <direction SearchDir>
+void one_to_all(timetable const& tt,
+                rt_timetable const* rtt,
+                query const& q,
+                raptor_state& state) {
+  if (rtt == nullptr) {
+    one_to_all<SearchDir, false>(tt, rtt, q, state);
+  } else {
+    one_to_all<SearchDir, true>(tt, rtt, q, state);
+  }
 }
 
 template <direction SearchDir>
 raptor_state one_to_all(timetable const& tt,
                         rt_timetable const* rtt,
                         query const& q) {
-  if (rtt == nullptr) {
-    return one_to_all<SearchDir, false>(tt, rtt, q);
-  } else {
-    return one_to_all<SearchDir, true>(tt, rtt, q);
-  }
+  auto state = raptor_state{};
+  one_to_all<SearchDir>(tt, rtt, q, state);
+  return state;
 }
 
 fastest_offset get_fastest_one_to_all_offsets(timetable const& tt,
@@ -187,5 +197,13 @@ template raptor_state one_to_all<direction::kForward>(timetable const&,
 template raptor_state one_to_all<direction::kBackward>(timetable const&,
                                                        rt_timetable const*,
                                                        query const&);
+template void one_to_all<direction::kForward>(timetable const&,
+                                              rt_timetable const*,
+                                              query const&,
+                                              raptor_state&);
+template void one_to_all<direction::kBackward>(timetable const&,
+                                               rt_timetable const*,
+                                               query const&,
+                                               raptor_state&);
 
 }  // namespace nigiri::routing

@@ -24,6 +24,15 @@ raptor_state one_to_all(timetable const& tt,
                         rt_timetable const* rtt,
                         query const& q);
 
+// Same result as above, written into a caller-owned state. Reusing one state
+// across queries (e.g. one per worker thread) avoids reallocating and
+// zero-filling it for every query; every query still starts from a reset state.
+template <direction SearchDir>
+void one_to_all(timetable const& tt,
+                rt_timetable const* rtt,
+                query const& q,
+                raptor_state& state);
+
 fastest_offset get_fastest_one_to_all_offsets(timetable const& tt,
                                               raptor_state const& state,
                                               direction,

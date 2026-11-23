@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <cstdlib>
 #include <limits>
@@ -114,7 +115,12 @@ struct raptor {
     assert(Vias == via_stops_.size());
 
     if constexpr (SearchMode == search_mode::kOneToAll) {
-      state_.one_to_all_arrivals_.resize(kMaxTransfers + 2U, n_locations_);
+      auto& arrivals = state_.one_to_all_arrivals_;
+      if (arrivals.n_rows_ != kMaxTransfers + 2U ||
+          arrivals.n_columns_ != n_locations_) {
+        arrivals.resize(kMaxTransfers + 2U, n_locations_);
+        state_.one_to_all_dirty_rows_ = kMaxTransfers + 2U;
+      }
     }
     reset_arrivals();
 
@@ -194,7 +200,13 @@ struct raptor {
     utl::fill(time_at_dest_, kInvalid);
     round_times_.reset(kInvalidArray);
     if constexpr (SearchMode == search_mode::kOneToAll) {
-      utl::fill(state_.one_to_all_arrivals_.entries_, kInvalid);
+      // Only rows written since the last reset can differ from kInvalid.
+      auto& arrivals = state_.one_to_all_arrivals_;
+      std::fill_n(begin(arrivals.entries_),
+                  static_cast<std::size_t>(state_.one_to_all_dirty_rows_) *
+                      arrivals.n_columns_,
+                  kInvalid);
+      state_.one_to_all_dirty_rows_ = 0U;
     }
   }
 
@@ -238,6 +250,8 @@ struct raptor {
     trace_print_init_state();
 
     if constexpr (SearchMode == search_mode::kOneToAll) {
+      state_.one_to_all_dirty_rows_ = std::max(
+          state_.one_to_all_dirty_rows_, static_cast<std::uint32_t>(end_k));
       update_one_to_all_arrivals(0U);
     }
     for (auto k = 1U; k != end_k; ++k) {
@@ -734,23 +748,37 @@ private:
     return target_v == v ? 0_minutes : via_stops_[v].stay_;
   }
 
+  // Only locations whose tmp_ improved in round k (prev_station_mark_, see
+  // loop_routes) or whose round_times_[k] improved (station_mark_: starts in
+  // round 0, transfers and footpaths after it) are visited. The other writes
+  // to round_times_[k] are at locations in prev_station_mark_ (update_transfers)
+  // or later than time_at_dest_ (update_footpaths), which finish_one_to_all
+  // drops. A location not visited in round k only carries its tmp_ from an
+  // earlier round, which is never a strict improvement over an earlier row, so
+  // the finished arrivals equal those of a scan over all locations.
   void update_one_to_all_arrivals(unsigned const k) {
-    for (auto i = 0U; i != n_locations_; ++i) {
-      auto const l = location_idx_t{i};
+    state_.prev_station_mark_.for_each_set_bit(
+        [&](std::uint64_t const i) { update_one_to_all_arrival(k, i); });
+    state_.station_mark_.for_each_set_bit(
+        [&](std::uint64_t const i) { update_one_to_all_arrival(k, i); });
+  }
 
-      // Arrivals are tracked only at the base.
-      auto const base = Rt ? rtt_->base(l) : tt_.base(l);
+  void update_one_to_all_arrival(unsigned const k, std::uint64_t const idx) {
+    auto const i = static_cast<unsigned>(idx);
+    auto const l = location_idx_t{i};
 
-      // Take best over all transport arrivals.
-      auto& by_transport = state_.one_to_all_arrivals_[k][to_idx(base)];
-      by_transport = get_best(by_transport, tmp_[i][Vias]);
+    // Arrivals are tracked only at the base.
+    auto const base = Rt ? rtt_->base(l) : tt_.base(l);
 
-      // Take best over all walk arrivals.
-      // (also contains unqualified transfer rule sides)
-      if (base == l) {
-        auto& at_stop = state_.one_to_all_arrivals_[k][i];
-        at_stop = get_best(at_stop, round_times_[k][i][Vias]);
-      }
+    // Take best over all transport arrivals.
+    auto& by_transport = state_.one_to_all_arrivals_[k][to_idx(base)];
+    by_transport = get_best(by_transport, tmp_[i][Vias]);
+
+    // Take best over all walk arrivals.
+    // (also contains unqualified transfer rule sides)
+    if (base == l) {
+      auto& at_stop = state_.one_to_all_arrivals_[k][i];
+      at_stop = get_best(at_stop, round_times_[k][i][Vias]);
     }
   }
 

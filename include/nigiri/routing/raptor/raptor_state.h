@@ -105,6 +105,12 @@ struct raptor_state {
   std::vector<delta_t> round_times_storage_;
   std::vector<delta_t> bounds_storage_;
   cista::raw::flat_matrix<delta_t> one_to_all_arrivals_;
+
+  // Rows [0, one_to_all_dirty_rows_) of one_to_all_arrivals_ may hold values;
+  // all later rows are kInvalid. Lets a reused state reset (and finish) only
+  // the rounds a query can reach (max_transfers + 2) instead of all
+  // kMaxTransfers + 2. A shape change marks every row dirty.
+  std::uint32_t one_to_all_dirty_rows_{0U};
   bitvec station_mark_;
   bitvec prev_station_mark_;
   bitvec route_mark_;
