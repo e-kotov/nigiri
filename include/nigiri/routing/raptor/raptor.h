@@ -757,8 +757,8 @@ private:
   // (update_footpaths), which finish_one_to_all drops. A location not visited in
   // round k only carries its tmp_ from an earlier round, which is never a strict
   // improvement over an earlier row, so the finished arrivals equal those of a
-  // scan over all locations. Dense rounds (more than 1/8 of the locations
-  // marked) scan all locations sequentially, which is cheaper there.
+  // scan over all locations. Rounds with more than 1/32 of the locations
+  // marked scan all locations sequentially: scattered visits cost cache misses.
   void update_one_to_all_arrivals(unsigned const k) {
     auto const& prev = state_.prev_station_mark_.blocks_;
     auto const& curr = state_.station_mark_.blocks_;
@@ -768,7 +768,7 @@ private:
       n_marked += static_cast<std::size_t>(
           std::popcount(static_cast<std::uint64_t>(prev[b] | curr[b])));
     }
-    if (n_marked * 8U > n_locations_) {
+    if (n_marked * 32U > n_locations_) {
       for (auto i = 0U; i != n_locations_; ++i) {
         update_one_to_all_arrival(k, i);
       }
