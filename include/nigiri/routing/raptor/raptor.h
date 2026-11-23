@@ -759,30 +759,9 @@ private:
   // improvement over an earlier row, so the finished arrivals equal those of a
   // scan over all locations. Dense rounds (more than 1/8 of the locations
   // marked) scan all locations sequentially, which is cheaper there.
-  void update_one_to_all_arrivals(unsigned const k) {
-    auto const& prev = state_.prev_station_mark_.blocks_;
-    auto const& curr = state_.station_mark_.blocks_;
-    assert(prev.size() == curr.size());
-    auto n_marked = std::size_t{0U};
-    for (auto b = std::size_t{0U}; b != prev.size(); ++b) {
-      n_marked += static_cast<std::size_t>(
-          std::popcount(static_cast<std::uint64_t>(prev[b] | curr[b])));
-    }
-    if (n_marked * 8U > n_locations_) {
-      for (auto i = 0U; i != n_locations_; ++i) {
-        update_one_to_all_arrival(k, i);
-      }
-      return;
-    }
-    constexpr auto kBits = static_cast<std::uint64_t>(bitvec::bits_per_block);
-    for (auto b = std::size_t{0U}; b != prev.size(); ++b) {
-      auto bits = static_cast<std::uint64_t>(prev[b] | curr[b]);
-      while (bits != 0U) {
-        auto const i =
-            b * kBits + static_cast<std::uint64_t>(std::countr_zero(bits));
-        bits &= bits - 1U;
-        update_one_to_all_arrival(k, i);
-      }
+  void update_one_to_all_arrivals(unsigned const k) {  // EXPERIMENT: stock full scan
+    for (auto i = 0U; i != n_locations_; ++i) {
+      update_one_to_all_arrival(k, i);
     }
   }
 
