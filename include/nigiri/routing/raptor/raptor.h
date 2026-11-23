@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
 #include <cassert>
 #include <cstdlib>
 #include <limits>
@@ -757,10 +758,19 @@ private:
   // earlier round, which is never a strict improvement over an earlier row, so
   // the finished arrivals equal those of a scan over all locations.
   void update_one_to_all_arrivals(unsigned const k) {
-    state_.prev_station_mark_.for_each_set_bit(
-        [&](std::uint64_t const i) { update_one_to_all_arrival(k, i); });
-    state_.station_mark_.for_each_set_bit(
-        [&](std::uint64_t const i) { update_one_to_all_arrival(k, i); });
+    // One pass over the union of both marks: each location at most once.
+    auto const& prev = state_.prev_station_mark_.blocks_;
+    auto const& curr = state_.station_mark_.blocks_;
+    assert(prev.size() == curr.size());
+    constexpr auto kBits = static_cast<std::uint64_t>(bitvec::bits_per_block);
+    for (auto b = std::size_t{0U}; b != prev.size(); ++b) {
+      auto bits = static_cast<std::uint64_t>(prev[b] | curr[b]);
+      while (bits != 0U) {
+        auto const i = b * kBits + static_cast<std::uint64_t>(std::countr_zero(bits));
+        bits &= bits - 1U;
+        update_one_to_all_arrival(k, i);
+      }
+    }
   }
 
   void update_one_to_all_arrival(unsigned const k, std::uint64_t const idx) {
