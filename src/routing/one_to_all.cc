@@ -58,13 +58,18 @@ void finish_one_to_all(delta_t const worst_at_dest, raptor_state& state) {
   auto& arrivals = state.one_to_all_arrivals_;
 
   // Rows from one_to_all_dirty_rows_ on were not reached by this query and
-  // are kInvalid already.
+  // are kInvalid already. Rows are visited in order (sequential access); per
+  // location the rounds are still taken in ascending order.
   auto const n_rows = state.one_to_all_dirty_rows_;
   for (auto l = location_idx_t{0U}; l != state.n_locations_; ++l) {
-    auto& b = best[to_idx(l)][kVias];
-    b = kInvalid;
-    for (auto k = 0U; k != n_rows; ++k) {
-      auto& t = arrivals[k][to_idx(l)];
+    best[to_idx(l)][kVias] = kInvalid;
+  }
+  for (auto k = 0U; k != n_rows; ++k) {
+    auto* const row = arrivals.entries_.data() +
+                      static_cast<std::size_t>(k) * arrivals.n_columns_;
+    for (auto l = 0U; l != state.n_locations_; ++l) {
+      auto& b = best[l][kVias];
+      auto& t = row[l];
       if (is_better(t, b) && !is_better(worst_at_dest, t)) {
         b = t;
       } else {
