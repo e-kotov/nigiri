@@ -1,5 +1,5 @@
-#include <algorithm>
 #include <cstdint>
+#include <algorithm>
 #include <string_view>
 
 #include "gtest/gtest.h"
@@ -126,12 +126,16 @@ TEST(one_to_all, reused_state_across_directions_equals_fresh_state) {
     std::uint8_t mt_;
     char const* hhmm_;
   };
-  auto const steps = std::vector<step>{
-      {direction::kForward, 0U, "10:00"},  {direction::kBackward, 2U, "11:30"},
-      {direction::kForward, 14U, "10:00"}, {direction::kBackward, 0U, "11:30"},
-      {direction::kBackward, 14U, "11:30"}, {direction::kForward, 2U, "10:20"},
-      {direction::kBackward, 1U, "11:00"}, {direction::kForward, 1U, "09:50"},
-      {direction::kForward, 14U, "10:40"}, {direction::kBackward, 2U, "11:10"}};
+  auto const steps = std::vector<step>{{direction::kForward, 0U, "10:00"},
+                                       {direction::kBackward, 2U, "11:30"},
+                                       {direction::kForward, 14U, "10:00"},
+                                       {direction::kBackward, 0U, "11:30"},
+                                       {direction::kBackward, 14U, "11:30"},
+                                       {direction::kForward, 2U, "10:20"},
+                                       {direction::kBackward, 1U, "11:00"},
+                                       {direction::kForward, 1U, "09:50"},
+                                       {direction::kForward, 14U, "10:40"},
+                                       {direction::kBackward, 2U, "11:10"}};
   for (auto l = 0U; l != tt.n_locations(); ++l) {
     for (auto const& s : steps) {
       run(s.dir_, s.mt_, s.hhmm_, location_idx_t{l});

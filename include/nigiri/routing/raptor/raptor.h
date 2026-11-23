@@ -1,9 +1,9 @@
 #pragma once
 
-#include <algorithm>
-#include <bit>
 #include <cassert>
 #include <cstdlib>
+#include <algorithm>
+#include <bit>
 #include <limits>
 #include <span>
 #include <vector>
@@ -756,11 +756,11 @@ private:
   // (station_mark_: starts in round 0, transfers and footpaths after it) are
   // visited, each once. The other writes to round_times_[k] are at locations in
   // prev_station_mark_ (update_transfers) or later than time_at_dest_
-  // (update_footpaths), which finish_one_to_all drops. A location not visited in
-  // round k only carries its tmp_ from an earlier round, which is never a strict
-  // improvement over an earlier row, so the finished arrivals equal those of a
-  // scan over all locations. Dense rounds (more than 1/8 of the locations
-  // marked) scan all locations sequentially, which is cheaper there.
+  // (update_footpaths), which finish_one_to_all drops. A location not visited
+  // in round k only carries its tmp_ from an earlier round, which is never a
+  // strict improvement over an earlier row, so the finished arrivals equal
+  // those of a scan over all locations. Dense rounds (more than 1/8 of the
+  // locations marked) scan all locations sequentially, which is cheaper there.
   void update_one_to_all_arrivals(unsigned const k) {
     auto const& prev = state_.prev_station_mark_.blocks_;
     auto const& curr = state_.station_mark_.blocks_;
