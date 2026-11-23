@@ -85,3 +85,56 @@ TEST(one_to_all, reused_state_equals_fresh_state_without_rules) {
   expect_reused_equals_fresh<direction::kForward>(tt);
   expect_reused_equals_fresh<direction::kBackward>(tt);
 }
+
+// One state alternating between search directions (whose kInvalid sentinels
+// differ) with transfer limits going up and down, including forward
+// max_transfers 0 followed by backward max_transfers 2: every query equals a
+// fresh state in every row.
+TEST(one_to_all, reused_state_across_directions_equals_fresh_state) {
+  auto const tt = test::load_network("S1,S1,3,,,,,\nS1,S1,2,60,RF,RH,,");
+  auto reused = raptor_state{};
+  auto const run = [&](direction const dir, std::uint8_t const mt,
+                       char const* hhmm, location_idx_t const l) {
+    auto const q = query{.start_time_ = test::at(hhmm),
+                         .start_ = {{l, 0_minutes, 0U}},
+                         .max_transfers_ = mt};
+    auto const fresh = dir == direction::kForward
+                           ? one_to_all<direction::kForward>(tt, nullptr, q)
+                           : one_to_all<direction::kBackward>(tt, nullptr, q);
+    if (dir == direction::kForward) {
+      one_to_all<direction::kForward>(tt, nullptr, q, reused);
+    } else {
+      one_to_all<direction::kBackward>(tt, nullptr, q, reused);
+    }
+    auto const& a = fresh.one_to_all_arrivals_;
+    auto const& b = reused.one_to_all_arrivals_;
+    ASSERT_EQ(a.n_rows_, b.n_rows_);
+    ASSERT_EQ(a.n_columns_, b.n_columns_);
+    EXPECT_TRUE(std::equal(begin(a.entries_), end(a.entries_),
+                           begin(b.entries_), end(b.entries_)))
+        << "dir=" << (dir == direction::kForward ? "fwd" : "bwd")
+        << " max_transfers=" << static_cast<int>(mt) << " at " << hhmm
+        << " start=" << l;
+    auto const best_a = fresh.template get_best<0U>();
+    auto const best_b = reused.template get_best<0U>();
+    for (auto x = 0U; x != tt.n_locations(); ++x) {
+      EXPECT_EQ(best_a[x][0], best_b[x][0]);
+    }
+  };
+  struct step {
+    direction dir_;
+    std::uint8_t mt_;
+    char const* hhmm_;
+  };
+  auto const steps = std::vector<step>{
+      {direction::kForward, 0U, "10:00"},  {direction::kBackward, 2U, "11:30"},
+      {direction::kForward, 14U, "10:00"}, {direction::kBackward, 0U, "11:30"},
+      {direction::kBackward, 14U, "11:30"}, {direction::kForward, 2U, "10:20"},
+      {direction::kBackward, 1U, "11:00"}, {direction::kForward, 1U, "09:50"},
+      {direction::kForward, 14U, "10:40"}, {direction::kBackward, 2U, "11:10"}};
+  for (auto l = 0U; l != tt.n_locations(); ++l) {
+    for (auto const& s : steps) {
+      run(s.dir_, s.mt_, s.hhmm_, location_idx_t{l});
+    }
+  }
+}
