@@ -118,9 +118,11 @@ struct raptor {
     if constexpr (SearchMode == search_mode::kOneToAll) {
       auto& arrivals = state_.one_to_all_arrivals_;
       if (arrivals.n_rows_ != kMaxTransfers + 2U ||
-          arrivals.n_columns_ != n_locations_) {
+          arrivals.n_columns_ != n_locations_ ||
+          state_.one_to_all_dir_ != SearchDir) {
         arrivals.resize(kMaxTransfers + 2U, n_locations_);
         state_.one_to_all_dirty_rows_ = kMaxTransfers + 2U;
+        state_.one_to_all_dir_ = SearchDir;
       }
     }
     reset_arrivals();

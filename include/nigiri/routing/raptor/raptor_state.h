@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -107,10 +108,12 @@ struct raptor_state {
   cista::raw::flat_matrix<delta_t> one_to_all_arrivals_;
 
   // Rows [0, one_to_all_dirty_rows_) of one_to_all_arrivals_ may hold values;
-  // all later rows are kInvalid. Lets a reused state reset (and finish) only
-  // the rounds a query can reach (max_transfers + 2) instead of all
-  // kMaxTransfers + 2. A shape change marks every row dirty.
+  // all later rows are kInvalid of one_to_all_dir_. Lets a reused state reset
+  // (and finish) only the rounds a query can reach (max_transfers + 2) instead
+  // of all kMaxTransfers + 2. A shape change or a search in the other direction
+  // (whose kInvalid differs) marks every row dirty.
   std::uint32_t one_to_all_dirty_rows_{0U};
+  std::optional<direction> one_to_all_dir_{};
   bitvec station_mark_;
   bitvec prev_station_mark_;
   bitvec route_mark_;
